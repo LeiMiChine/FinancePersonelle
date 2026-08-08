@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Chantier — saisie express</title>
+<meta name="theme-color" content="#131519" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
+  :root { --bg:#131519; --panel:#1B1F26; --panel2:#161A20; --line:#2A3038; --text:#E8EDF2;
+          --dim:#8B98A9; --faint:#5A6472; --amber:#FFB020; --green:#3DD68C; --red:#FF5C5C; --cyan:#41D0C6; --blue:#4FA3FF; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; padding-bottom:40px; }
+  header { padding:14px 16px 10px; display:flex; align-items:baseline; gap:10px; }
+  header h1 { margin:0; font-family:'Barlow Condensed'; font-size:24px; letter-spacing:2px; text-transform:uppercase; }
+  header h1 b { color:var(--amber); }
+  header a { margin-left:auto; color:var(--dim); font-size:12px; text-decoration:none; }
+  .wrap { padding:0 12px; display:grid; gap:12px; max-width:640px; margin:0 auto; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .ptitle { font-family:'Barlow Condensed'; font-size:13px; letter-spacing:2px; text-transform:uppercase;
+            color:var(--dim); border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:10px; }
+  .bigbtn { display:block; width:100%; padding:16px; border:none; border-radius:8px; cursor:pointer;
+            font-family:'Barlow Condensed'; font-size:19px; letter-spacing:2px; text-transform:uppercase; font-weight:700;
+            background:var(--amber); color:#131519; }
+  .ghost { background:transparent; border:1px dashed var(--line); color:var(--dim); }
+  .mono { font-family:'IBM Plex Mono',monospace; }
+  .kpis { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .kpi .l { font-family:'Barlow Condensed'; font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--faint); }
+  .kpi .v { font-family:'IBM Plex Mono'; font-size:22px; font-weight:600; color:var(--amber); }
+  .gauge { height:10px; background:var(--panel2); border:1px solid var(--line); border-radius:5px; overflow:hidden; margin:3px 0 8px; }
+  .gauge > div { height:100%; background:var(--green); transition:width .5s; }
+  .row { display:grid; grid-template-columns:1fr 52px 74px 28px; gap:6px; margin-bottom:6px; }
+  .row input { background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--text);
+               font-family:'IBM Plex Mono'; font-size:13px; padding:7px 6px; width:100%; min-width:0; }
+  .row .del { background:none; border:none; color:var(--faint); font-size:16px; cursor:pointer; }
+  .chips { display:flex; flex-wrap:wrap; gap:5px; margin:6px 0; }
+  .chip { padding:6px 11px; border-radius:13px; border:1px solid var(--line); background:transparent;
+          color:var(--dim); font-family:'Barlow Condensed'; font-size:13px; letter-spacing:1px; text-transform:uppercase; cursor:pointer; }
+  .chip.on { background:var(--amber); color:#131519; border-color:var(--amber); }
+  .chip.on.cy { background:var(--cyan); border-color:var(--cyan); }
+  .muted { font-size:11px; color:var(--faint); }
+  .lot { display:grid; grid-template-columns:86px 1fr 84px; gap:8px; align-items:center; padding:3px 0; }
+  .lot .nm { font-family:'Barlow Condensed'; font-size:13px; letter-spacing:1px; text-transform:uppercase; }
+  .lot .amt { font-family:'IBM Plex Mono'; font-size:11px; color:var(--dim); text-align:right; }
+  #status { font-family:'IBM Plex Mono'; font-size:12px; color:var(--amber); min-height:16px; margin-top:8px; }
+  .flash { animation: fl .8s; } @keyframes fl { 0% { background:#1e3a2a; } 100% { background:var(--panel); } }
+  .meta { display:flex; gap:6px; margin-bottom:8px; }
+  .meta input { background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--text);
+                font-family:'IBM Plex Mono'; font-size:13px; padding:7px 6px; }
+</style>
+</head>
+<body>
+<header><h1>Chantier <b>Express</b></h1><a href="./index.html">⌂ Pupitre</a></header>
+<div class="wrap">
+
+  <div class="panel" id="scanPanel">
+    <label class="bigbtn" style="text-align:center">
+      📷 Scanner un ticket / une capture
+      <input id="file" type="file" accept="image/*" capture="environment" style="display:none" />
+    </label>
+    <div id="status"></div>
+    <div class="muted">OCR 100 % local (rien ne quitte votre téléphone). Premier scan : téléchargement du module (~15 Mo, une fois). Toutes les lignes restent modifiables avant validation.</div>
+  </div>
+
+  <div class="panel" id="review" style="display:none">
+    <div class="ptitle">Vérifier avant validation</div>
+    <div class="meta">
+      <input id="mDate" type="date" style="width:140px" />
+      <input id="mMag" type="text" placeholder="Magasin" style="flex:1" />
+    </div>
+    <div id="rows"></div>
+    <button class="chip" id="addRow">+ ligne</button>
+    <div class="ptitle" style="margin-top:10px">Pièce (pour tout le ticket)</div>
+    <div class="chips" id="pieces"></div>
+    <div class="ptitle">Catégorie</div>
+    <div class="chips" id="cats"></div>
+    <button class="bigbtn" id="validate" style="margin-top:10px">✔ Valider — <span id="vTotal">0 €</span></button>
+    <button class="bigbtn ghost" id="cancel" style="margin-top:8px; padding:10px">Annuler</button>
+  </div>
+
+  <div class="panel">
+    <div class="ptitle">Saisie manuelle (10 s)</div>
+    <div class="row" style="grid-template-columns:1fr 74px">
+      <input id="qArt" placeholder="Article" />
+      <input id="qPrix" type="number" step="0.01" placeholder="Prix €" />
+    </div>
+    <div class="chips" id="qPieces"></div>
+    <div class="chips" id="qCats"></div>
+    <button class="bigbtn" id="qAdd" style="padding:12px">Ajouter</button>
+  </div>
+
+  <div class="panel" id="metrics">
+    <div class="ptitle">Compteurs — mis à jour en direct</div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Total chantier</div><div class="v" id="kTotal">—</div></div>
+      <div class="kpi"><div class="l">Ce mois-ci</div><div class="v" id="kMois">—</div></div>
+    </div>
+    <div id="lots" style="margin-top:10px"></div>
+    <div class="muted" id="lastAdd"></div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+"use strict";
+/* ============ Référentiels (identiques au Pupitre) ============ */
+const PIECES = ["BUREAU","GRENIER","SDB","CUISINE","CHAMBRE","DRESSING","COULOIR","TEMPORAIRE"];
+const CATS = ["MATERIAUX","CONSOMMABLE","OUTILLAGE","ACHAT","SERVICE","PLOMBERIE"];
+const MAGS = ["LEROY MERLIN","BRICOMAN","CASTORAMA","LIDL","AMAZON","IKEA","MANOMANO","GEDIMAT","SCIERIE"];
+const KEY = "cockpit-v1";
+
+/* ============ Stockage partagé avec le Pupitre ============ */
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; }
+}
+function save(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
+function todayIso() {
+  const n = new Date();
+  return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+}
+const eur = (v) => (v == null || isNaN(v)) ? "—" : v.toLocaleString("fr-FR", { maximumFractionDigits: 0 }) + " €";
+
+/* ============ Métriques ============ */
+function renderMetrics() {
+  const s = load();
+  const works = (s.expenses || []).filter((e) => e.chantier);
+  const total = works.reduce((a, e) => a + (Number(e.a) || 0), 0);
+  const mk = todayIso().slice(0, 7);
+  const mois = works.filter((e) => (e.d || "").startsWith(mk)).reduce((a, e) => a + (Number(e.a) || 0), 0);
+  document.getElementById("kTotal").textContent = eur(total);
+  document.getElementById("kMois").textContent = eur(mois);
+  const budgets = s.budgets || {};
+  const agg = {};
+  works.forEach((e) => {
+    const ps = (e.piece || "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (!ps.length) return;
+    ps.forEach((p) => { agg[p] = (agg[p] || 0) + (Number(e.a) || 0) / ps.length; });
+  });
+  const lots = document.getElementById("lots");
+  lots.innerHTML = "";
+  PIECES.forEach((p) => {
+    const reel = agg[p] || 0, bud = Number(budgets[p]) || 0;
+    if (!reel && !bud) return;
+    const pct = bud > 0 ? Math.min(100, (reel / bud) * 100) : (reel > 0 ? 100 : 0);
+    const col = bud > 0 && reel > bud ? "var(--red)" : pct > 90 ? "var(--amber)" : "var(--green)";
+    lots.insertAdjacentHTML("beforeend",
+      `<div class="lot"><span class="nm">${p}</span>
+       <div class="gauge"><div style="width:${pct}%;background:${col}"></div></div>
+       <span class="amt">${eur(reel)}${bud ? " / " + eur(bud) : ""}</span></div>`);
+  });
+  const last = works[works.length - 1];
+  document.getElementById("lastAdd").textContent = last ? `Dernier ajout : ${last.l || "article"} · ${eur(Number(last.a))} · ${last.piece || "—"}` : "";
+}
+
+/* ============ Puces ============ */
+function chips(elId, list, cls) {
+  const el = document.getElementById(elId);
+  el.innerHTML = "";
+  list.forEach((x) => {
+    const b = document.createElement("button");
+    b.className = "chip" + (cls ? " " + cls : "");
+    b.textContent = x;
+    b.onclick = () => { [...el.children].forEach((c) => c.classList.remove("on")); b.classList.add("on"); };
+    el.appendChild(b);
+  });
+}
+const picked = (elId) => { const on = document.querySelector("#" + elId + " .on"); return on ? on.textContent : ""; };
+chips("pieces", PIECES, "cy"); chips("cats", CATS);
+chips("qPieces", PIECES, "cy"); chips("qCats", CATS);
+
+/* ============ OCR + parsing ticket ============ */
+const EXCLUDE = /TOTAL|TVA|CARTE|\bCB\b|ESPECE|RENDU|MONTANT|SOUS.TOT|A PAYER|MERCI|SIRET|TEL|WWW|FIDELIT|REMISE GLOB|HT\b|TTC\b/i;
+function parseTicket(text) {
+  const lines = text.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 2);
+  const items = [];
+  let mag = "", date = "";
+  const dm = text.match(/(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})/);
+  if (dm) {
+    let y = dm[3].length === 2 ? "20" + dm[3] : dm[3];
+    date = `${y}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`;
+  }
+  for (const m of MAGS) if (text.toUpperCase().includes(m.split(" ")[0])) { mag = m; break; }
+  for (const l of lines) {
+    if (EXCLUDE.test(l)) continue;
+    // "2 X 3,99" ou "x2" → quantité
+    let q = 1, rest = l;
+    const qm = l.match(/(\d{1,2})\s*[xX×]\s*(\d+[.,]\d{2})/);
+    const pm = l.match(/(\d{1,4}(?:[.,]\d{3})*[.,]\d{2})\s*€?\s*$/);
+    if (!pm) continue;
+    let price = parseFloat(pm[1].replace(/\./g, "").replace(",", "."));
+    if (qm) { q = parseInt(qm[1]); }
+    if (isNaN(price) || price <= 0 || price > 5000) continue;
+    let label = l.slice(0, pm.index);
+    if (qm) label = label.replace(qm[0], " ");           // retire "2 X 12,50" du libellé
+    label = label.replace(/[\d.,€]+\s*$/, "").replace(/\s{2,}/g, " ").trim();
+    label = label.replace(/^\d+\s*[xX×]?\s*/, "").trim();
+    if (label.length < 2) continue;
+    items.push({ l: label.slice(0, 45), q, a: price });
+  }
+  return { items, mag, date };
+}
+
+/* ============ Écran de vérification ============ */
+let rows = [];
+function renderRows() {
+  const el = document.getElementById("rows");
+  el.innerHTML = "";
+  rows.forEach((r, i) => {
+    const div = document.createElement("div");
+    div.className = "row";
+    div.innerHTML = `<input value="${r.l.replace(/"/g, "&quot;")}" />
+      <input type="number" step="1" value="${r.q}" />
+      <input type="number" step="0.01" value="${r.a}" />
+      <button class="del">×</button>`;
+    const [iL, iQ, iA, del] = div.children;
+    iL.oninput = () => { r.l = iL.value; };
+    iQ.oninput = () => { r.q = Number(iQ.value) || 1; };
+    iA.oninput = () => { r.a = Number(iA.value) || 0; total(); };
+    del.onclick = () => { rows.splice(i, 1); renderRows(); };
+    el.appendChild(div);
+  });
+  total();
+}
+function total() {
+  const t = rows.reduce((s, r) => s + (Number(r.a) || 0), 0);
+  document.getElementById("vTotal").textContent = t.toLocaleString("fr-FR", { minimumFractionDigits: 2 }) + " €";
+}
+document.getElementById("addRow").onclick = () => { rows.push({ l: "", q: 1, a: 0 }); renderRows(); };
+document.getElementById("cancel").onclick = () => { document.getElementById("review").style.display = "none"; rows = []; };
+
+document.getElementById("validate").onclick = () => {
+  const piece = picked("pieces"), cat = picked("cats") || "MATERIAUX";
+  const d = document.getElementById("mDate").value || todayIso();
+  const mag = document.getElementById("mMag").value || "";
+  const valid = rows.filter((r) => r.l && Number(r.a) > 0);
+  if (!valid.length) return;
+  const s = load();
+  s.expenses = s.expenses || [];
+  valid.forEach((r) => s.expenses.push({ d, a: Number(r.a), q: Number(r.q) || 1, l: r.l, piece, cat, mag, chantier: true, manual: true }));
+  s.expenses.sort((x, y) => (x.d || "").localeCompare(y.d || ""));
+  save(s);
+  rows = [];
+  document.getElementById("review").style.display = "none";
+  document.getElementById("metrics").classList.remove("flash"); void document.getElementById("metrics").offsetWidth;
+  document.getElementById("metrics").classList.add("flash");
+  document.getElementById("status").textContent = valid.length + " article(s) enregistré(s) ✔";
+  renderMetrics();
+};
+
+/* ============ Scan ============ */
+document.getElementById("file").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const st = document.getElementById("status");
+  try {
+    st.textContent = "lecture du ticket… (le module se télécharge au premier scan)";
+    const res = await Tesseract.recognize(f, "fra", {
+      logger: (m) => { if (m.status === "recognizing text") st.textContent = "analyse… " + Math.round(m.progress * 100) + " %"; },
+    });
+    const parsed = parseTicket(res.data.text || "");
+    rows = parsed.items;
+    if (!rows.length) rows = [{ l: "", q: 1, a: 0 }];
+    document.getElementById("mDate").value = parsed.date || todayIso();
+    document.getElementById("mMag").value = parsed.mag || "";
+    document.getElementById("review").style.display = "block";
+    renderRows();
+    st.textContent = parsed.items.length
+      ? parsed.items.length + " article(s) détecté(s) — vérifiez, corrigez, validez"
+      : "OCR peu lisible sur ce ticket — lignes à saisir ci-dessous (ou re-photographiez à plat, bien éclairé)";
+    document.getElementById("review").scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    st.textContent = "échec du scan (" + (err.message || err) + ") — utilisez la saisie manuelle";
+  }
+  e.target.value = "";
+};
+
+/* ============ Saisie manuelle ============ */
+document.getElementById("qAdd").onclick = () => {
+  const l = document.getElementById("qArt").value.trim();
+  const a = Number(document.getElementById("qPrix").value);
+  if (!l || !a) return;
+  const s = load();
+  s.expenses = s.expenses || [];
+  s.expenses.push({ d: todayIso(), a, q: 1, l, piece: picked("qPieces"), cat: picked("qCats") || "MATERIAUX", mag: "", chantier: true, manual: true });
+  save(s);
+  document.getElementById("qArt").value = ""; document.getElementById("qPrix").value = "";
+  document.getElementById("metrics").classList.remove("flash"); void document.getElementById("metrics").offsetWidth;
+  document.getElementById("metrics").classList.add("flash");
+  renderMetrics();
+};
+
+renderMetrics();
+</script>
+</body>
+</html>
