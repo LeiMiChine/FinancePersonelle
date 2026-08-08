@@ -72,9 +72,10 @@
       <input id="mDate" type="date" style="width:140px" />
       <input id="mMag" type="text" placeholder="Magasin" style="flex:1" />
     </div>
+    <div class="chips" id="mMags"></div>
     <div id="rows"></div>
     <button class="chip" id="addRow">+ ligne</button>
-    <div class="ptitle" style="margin-top:10px">Pièce (pour tout le ticket)</div>
+    <div class="ptitle" style="margin-top:10px">Zones (plusieurs possibles — le montant sera réparti à parts égales)</div>
     <div class="chips" id="pieces"></div>
     <div class="ptitle">Catégorie</div>
     <div class="chips" id="cats"></div>
@@ -90,6 +91,7 @@
     </div>
     <div class="chips" id="qPieces"></div>
     <div class="chips" id="qCats"></div>
+    <div class="chips" id="qMags"></div>
     <button class="bigbtn" id="qAdd" style="padding:12px">Ajouter</button>
   </div>
 
@@ -115,6 +117,16 @@
   </div>
 
   <div class="panel">
+    <div class="ptitle">⚙ Mes zones — groupes de pièces, transverses… à votre main</div>
+    <div id="zoneList"></div>
+    <div style="display:flex; gap:6px; margin-top:8px">
+      <input id="zNew" type="text" placeholder="Nouvelle zone (ex : SDB + WC)" style="flex:1; background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--text); font-family:'IBM Plex Mono'; font-size:13px; padding:7px" />
+      <button class="chip on" id="zAdd">Ajouter</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Renommer une zone met à jour tout l'historique. Supprimer ne touche pas aux données (elles restent visibles dans les jauges).</div>
+  </div>
+
+  <div class="panel">
     <div class="ptitle">Journal — toucher ✎ pour modifier une ligne</div>
     <div id="journal" style="max-height:300px; overflow-y:auto"></div>
   </div>
@@ -137,7 +149,8 @@
 <script>
 "use strict";
 /* ============ Référentiels (identiques au Pupitre) ============ */
-const PIECES = ["BUREAU","GRENIER","SDB","CUISINE","CHAMBRE","DRESSING","COULOIR","TEMPORAIRE"];
+const ZONES_DEFAUT = ["BUREAU + GRENIER","SDB","CUISINE","CHAMBRE + DRESSING","COULOIR","OUTILS","CONSOMMABLES","TEMPORAIRE"];
+function zones() { const s = load(); return (s.zones && s.zones.length ? s.zones : ZONES_DEFAUT); }
 const CATS = ["MATERIAUX","CONSOMMABLE","OUTILLAGE","ACHAT","SERVICE","PLOMBERIE"];
 const MAGS = ["LEROY MERLIN","TECNOMAT","BRICOMAN","CASTORAMA","LIDL","AMAZON","IKEA","MANOMANO","GEDIMAT","SCIERIE"];
 const KEY = "cockpit-v1";
@@ -172,15 +185,24 @@ function renderMetrics() {
   });
   const lots = document.getElementById("lots");
   lots.innerHTML = "";
-  PIECES.forEach((p) => {
+  const noms = [...new Set([...zones(), ...Object.keys(agg), ...Object.keys(budgets)])];
+  noms.forEach((p) => {
     const reel = agg[p] || 0, bud = Number(budgets[p]) || 0;
-    if (!reel && !bud) return;
+    if (!reel && !bud && !zones().includes(p)) return;
     const pct = bud > 0 ? Math.min(100, (reel / bud) * 100) : (reel > 0 ? 100 : 0);
-    const col = bud > 0 && reel > bud ? "var(--red)" : pct > 90 ? "var(--amber)" : "var(--green)";
-    lots.insertAdjacentHTML("beforeend",
-      `<div class="lot"><span class="nm">${p}</span>
+    const col = bud > 0 && reel > bud ? "var(--red)" : pct > 90 && bud > 0 ? "var(--amber)" : "var(--green)";
+    const div = document.createElement("div");
+    div.className = "lot"; div.style.gridTemplateColumns = "minmax(86px,auto) 1fr auto 74px";
+    div.innerHTML = `<span class="nm">${p}</span>
        <div class="gauge"><div style="width:${pct}%;background:${col}"></div></div>
-       <span class="amt">${eur(reel)}${bud ? " / " + eur(bud) : ""}</span></div>`);
+       <span class="amt">${eur(reel)} /</span><span></span>`;
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.value = bud || "";
+    inp.placeholder = "budget";
+    inp.style.cssText = "background:var(--panel2);border:1px solid var(--line);border-radius:5px;color:var(--text);font-family:'IBM Plex Mono';font-size:11px;padding:4px 5px;width:70px;text-align:right";
+    inp.onchange = () => { const s2 = load(); s2.budgets = s2.budgets || {}; s2.budgets[p] = Number(inp.value) || 0; save(s2); renderMetrics(); };
+    div.lastElementChild.replaceWith(inp);
+    lots.appendChild(div);
   });
   const last = works[works.length - 1];
   document.getElementById("lastAdd").textContent = last ? `Dernier ajout : ${last.l || "article"} · ${eur(Number(last.a))} · ${last.piece || "—"}` : "";
@@ -199,8 +221,75 @@ function chips(elId, list, cls) {
   });
 }
 const picked = (elId) => { const on = document.querySelector("#" + elId + " .on"); return on ? on.textContent : ""; };
-chips("pieces", PIECES, "cy"); chips("cats", CATS);
-chips("qPieces", PIECES, "cy"); chips("qCats", CATS);
+function zoneChips(elId) {
+  const el = document.getElementById(elId);
+  const cur = () => [...el.querySelectorAll(".on")].map((b) => b.textContent);
+  const render = () => {
+    const sel = new Set(cur());
+    el.innerHTML = "";
+    zones().forEach((z) => {
+      const b = document.createElement("button");
+      b.className = "chip cy" + (sel.has(z) ? " on" : "");
+      b.textContent = z;
+      b.onclick = () => b.classList.toggle("on");   // multi-sélection : chaque puce s'allume indépendamment
+      el.appendChild(b);
+    });
+  };
+  render();
+  return { render, value: () => cur().join(", ") };
+}
+const piecesUI = zoneChips("pieces");
+const qPiecesUI = zoneChips("qPieces");
+chips("cats", CATS); chips("qCats", CATS);
+
+/* ============ Magasins : connus + découverts + personnalisés ============ */
+function allMags() {
+  const s = load();
+  const freq = {};
+  (s.expenses || []).forEach((e) => { const m = (e.mag || "").trim().toUpperCase(); if (m) freq[m] = (freq[m] || 0) + 1; });
+  const found = Object.keys(freq).sort((a, b) => freq[b] - freq[a]);
+  const custom = (s.magasins || []).map((m) => m.toUpperCase());
+  const seen = new Set();
+  return [...MAGS, ...found, ...custom].filter((m) => m && !seen.has(m) && seen.add(m)).slice(0, 16);
+}
+function magChips(elId, inputId) {
+  const el = document.getElementById(elId);
+  const input = inputId ? document.getElementById(inputId) : null;
+  const cur = () => (input ? input.value : el.dataset.val || "").trim().toUpperCase();
+  const render = () => {
+    el.innerHTML = "";
+    allMags().forEach((m) => {
+      const b = document.createElement("button");
+      b.className = "chip" + (cur() === m ? " on" : "");
+      b.textContent = m;
+      b.onclick = () => {
+        const already = cur() === m;
+        if (input) input.value = already ? "" : m;
+        else el.dataset.val = already ? "" : m;
+        render();
+      };
+      el.appendChild(b);
+    });
+    const plus = document.createElement("button");
+    plus.className = "chip"; plus.style.borderStyle = "dashed"; plus.textContent = "+ Autre";
+    plus.onclick = () => {
+      const nom = (window.prompt("Nom du magasin ?") || "").trim().toUpperCase();
+      if (!nom) return;
+      const s = load();
+      s.magasins = s.magasins || [];
+      if (!s.magasins.includes(nom) && !MAGS.includes(nom)) s.magasins.push(nom);
+      save(s);
+      if (input) input.value = nom; else el.dataset.val = nom;
+      render();
+    };
+    el.appendChild(plus);
+  };
+  if (input) input.addEventListener("input", render);
+  render();
+  return { render, value: cur };
+}
+const mMagsUI = magChips("mMags", "mMag");
+const qMagsUI = magChips("qMags", null);
 
 /* ============ OCR + parsing ticket ============ */
 const EXCLUDE = /TOTAL|TVA|CARTE|\bCB\b|ESPECE|RENDU|MONTANT|SOUS.TOT|A PAYER|MERCI|SIRET|TEL|WWW|FIDELIT|REMISE GLOB|HT\b|TTC\b/i;
@@ -291,7 +380,7 @@ document.getElementById("addRow").onclick = () => { rows.push({ l: "", q: 1, a: 
 document.getElementById("cancel").onclick = () => { document.getElementById("review").style.display = "none"; rows = []; };
 
 document.getElementById("validate").onclick = () => {
-  const piece = picked("pieces"), cat = picked("cats") || "MATERIAUX";
+  const piece = piecesUI.value(), cat = picked("cats") || "MATERIAUX";
   const d = document.getElementById("mDate").value || todayIso();
   const mag = document.getElementById("mMag").value || "";
   const valid = rows.filter((r) => r.l && Number(r.a) > 0);
@@ -341,6 +430,7 @@ function openReview(parsed, fallbackMsg) {
   rows = parsed.items.length ? parsed.items : [{ l: "", q: 1, a: 0 }];
   document.getElementById("mDate").value = parsed.date || todayIso();
   document.getElementById("mMag").value = parsed.mag || "";
+  mMagsUI.render();
   document.getElementById("review").style.display = "block";
   renderRows();
   document.getElementById("status").textContent = parsed.items.length
@@ -408,7 +498,7 @@ document.getElementById("qAdd").onclick = () => {
   if (!l || !a) return;
   const s = load();
   s.expenses = s.expenses || [];
-  s.expenses.push({ d: todayIso(), a, q: 1, l, piece: picked("qPieces"), cat: picked("qCats") || "MATERIAUX", mag: "", chantier: true, manual: true });
+  s.expenses.push({ d: todayIso(), a, q: 1, l, piece: qPiecesUI.value(), cat: picked("qCats") || "MATERIAUX", mag: qMagsUI.value(), chantier: true, manual: true });
   save(s);
   document.getElementById("qArt").value = ""; document.getElementById("qPrix").value = "";
   document.getElementById("metrics").classList.remove("flash"); void document.getElementById("metrics").offsetWidth;
@@ -520,15 +610,26 @@ function renderJournal() {
           c.appendChild(b);
         });
       };
-      mkChips("ePieces", PIECES, e.piece); mkChips("eCats", CATS, e.cat);
+      const mkMulti = (id, list, curStr) => {
+        const sel = new Set((curStr || "").split(",").map((x) => x.trim()).filter(Boolean));
+        const c = div.querySelector("#" + id);
+        list.forEach((x) => {
+          const b = document.createElement("button");
+          b.className = "chip" + (sel.has(x) ? " on" : "");
+          b.textContent = x;
+          b.onclick = () => b.classList.toggle("on");
+          c.appendChild(b);
+        });
+      };
+      mkMulti("ePieces", zones(), e.piece); mkChips("eCats", CATS, e.cat);
       div.querySelector("#eOk").onclick = () => {
         const s2 = load();
-        const pieceOn = div.querySelector("#ePieces .on"), catOn = div.querySelector("#eCats .on");
+        const catOn = div.querySelector("#eCats .on");
         s2.expenses[i] = { ...s2.expenses[i],
           l: div.querySelector("#eL").value,
           q: Number(div.querySelector("#eQ").value) || 1,
           a: Number(div.querySelector("#eA").value) || 0,
-          piece: pieceOn ? pieceOn.textContent : s2.expenses[i].piece,
+          piece: [...div.querySelectorAll("#ePieces .on")].map((b) => b.textContent).join(", ") || s2.expenses[i].piece,
           cat: catOn ? catOn.textContent : s2.expenses[i].cat };
         save(s2); editIdx = null; renderAll();
       };
@@ -540,7 +641,7 @@ function renderJournal() {
       div.className = "lot"; div.style.gridTemplateColumns = "auto 1fr auto auto auto";
       div.innerHTML = `<span class="amt">${(e.d || "").slice(8)}/${(e.d || "").slice(5, 7)}/${(e.d || "").slice(2, 4)}</span>
         <span class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)">${(e.l || "—").slice(0, 34)}</span>
-        <span class="mono" style="font-size:11px;color:var(--cyan)">${(e.piece || "").slice(0, 8)}</span>
+        <span class="mono" style="font-size:11px;color:var(--cyan)">${(e.piece || "").slice(0, 16)}</span>
         <span class="mono" style="font-size:12px">${(Number(e.a) || 0).toFixed(2)} €</span>
         <button class="del" style="color:var(--amber)">✎</button>`;
       div.lastElementChild.onclick = () => { editIdx = i; renderJournal(); };
@@ -550,7 +651,50 @@ function renderJournal() {
   if (!works.length) el.innerHTML = '<div class="muted">Aucune ligne pour l\'instant.</div>';
 }
 
-function renderAll() { renderMetrics(); renderHisto(); renderBank(); renderAnalytics(); renderJournal(); }
+/* ============ Éditeur de zones ============ */
+function renameZoneEverywhere(oldName, newName) {
+  const s = load();
+  s.zones = zones().map((z) => (z === oldName ? newName : z));
+  if (s.budgets && s.budgets[oldName] != null) { s.budgets[newName] = s.budgets[oldName]; delete s.budgets[oldName]; }
+  s.expenses = (s.expenses || []).map((e) => {
+    if (!e.piece) return e;
+    const parts = e.piece.split(",").map((x) => x.trim()).map((x) => (x === oldName ? newName : x));
+    return { ...e, piece: parts.join(", ") };
+  });
+  save(s);
+}
+function renderZones() {
+  const el = document.getElementById("zoneList");
+  el.innerHTML = "";
+  zones().forEach((z) => {
+    const div = document.createElement("div");
+    div.className = "lot"; div.style.gridTemplateColumns = "1fr auto auto";
+    div.innerHTML = `<span class="nm">${z}</span>
+      <button class="del" style="color:var(--amber)">✎</button>
+      <button class="del">×</button>`;
+    const [, ren, del] = div.children;
+    ren.onclick = () => {
+      const n = (window.prompt("Nouveau nom pour « " + z + " »", z) || "").trim().toUpperCase();
+      if (n && n !== z) { renameZoneEverywhere(z, n); renderAll(); }
+    };
+    del.onclick = () => {
+      const s = load(); s.zones = zones().filter((x) => x !== z); save(s); renderAll();
+    };
+    el.appendChild(div);
+  });
+}
+document.getElementById("zAdd").onclick = () => {
+  const n = (document.getElementById("zNew").value || "").trim().toUpperCase();
+  if (!n) return;
+  const s = load();
+  s.zones = zones().slice();
+  if (!s.zones.includes(n)) s.zones.push(n);
+  save(s);
+  document.getElementById("zNew").value = "";
+  renderAll();
+};
+
+function renderAll() { renderMetrics(); renderHisto(); renderBank(); renderAnalytics(); renderJournal(); mMagsUI.render(); qMagsUI.render(); piecesUI.render(); qPiecesUI.render(); renderZones(); }
 renderAll();
 </script>
 </body>
