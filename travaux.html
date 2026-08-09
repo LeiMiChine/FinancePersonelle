@@ -52,7 +52,11 @@
 <body>
 <header><h1>Chantier <b>Express</b></h1><a href="./index.html">⌂ Pupitre</a></header>
 <div class="wrap">
-
+  <div style="display:flex; gap:6px; margin-bottom:2px">
+    <button class="chip on" id="tabBtnMain" style="flex:1; padding:10px">Chantier</button>
+    <button class="chip" id="tabBtnRegl" style="flex:1; padding:10px">⚙ Réglages</button>
+  </div>
+  <div id="tabMain" style="display:grid; gap:12px">
   <div class="panel" id="scanPanel">
     <label class="bigbtn" style="text-align:center">
       📷 Scanner un ticket / une capture
@@ -117,6 +121,23 @@
   </div>
 
   <div class="panel">
+    <div class="ptitle">Par catégorie — la nature des dépenses</div>
+    <div id="cats2"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ptitle">Par fournisseur</div>
+    <div id="mags"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ptitle">Dans le temps — 12 derniers mois actifs</div>
+    <div id="timeline"></div>
+  </div>
+
+  </div>
+  <div id="tabRegl" style="display:none; grid-template-columns:1fr; gap:12px">
+  <div class="panel">
     <div class="ptitle">⚙ Mes zones — groupes de pièces, transverses… à votre main</div>
     <div id="zoneList"></div>
     <div style="display:flex; gap:6px; margin-top:8px">
@@ -132,21 +153,6 @@
       style="width:100%; margin-bottom:8px; background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--text); font-family:'IBM Plex Mono'; font-size:13px; padding:8px" />
     <div id="jCount" class="muted" style="margin-bottom:4px"></div>
     <div id="journal" style="max-height:340px; overflow-y:auto"></div>
-  </div>
-
-  <div class="panel">
-    <div class="ptitle">Par catégorie — la nature des dépenses</div>
-    <div id="cats2"></div>
-  </div>
-
-  <div class="panel">
-    <div class="ptitle">Par fournisseur</div>
-    <div id="mags"></div>
-  </div>
-
-  <div class="panel">
-    <div class="ptitle">Dans le temps — 12 derniers mois actifs</div>
-    <div id="timeline"></div>
   </div>
 
   <div class="panel">
@@ -167,6 +173,8 @@
     <div id="maintMsg" class="muted" style="margin-top:6px; color:var(--amber)"></div>
   </div>
 
+
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
@@ -176,10 +184,11 @@
 "use strict";
 /* ============ Référentiels (identiques au Pupitre) ============ */
 const ZONES_DEFAUT = ["BUREAU + GRENIER","SDB","CUISINE","CHAMBRE + DRESSING","COULOIR","TEMPORAIRE"];
+const ZONES_BANNIES = ["OUTILS", "OUTIL", "OUTILLAGE", "CONSOMMABLES", "CONSOMMABLE"]; // la nature = Catégorie, jamais Pièce
 function zones() {
   const s = load();
   const z = (s.zones && s.zones.length ? s.zones : ZONES_DEFAUT)
-    .filter((x) => !["OUTILS", "CONSOMMABLES"].includes(x));   // la nature d'une dépense = Catégorie, pas Pièce
+    .filter((x) => !ZONES_BANNIES.includes(x.toUpperCase().trim()));
   return z.length ? z : ZONES_DEFAUT;
 }
 const CATS = ["MATERIAUX","CONSOMMABLE","OUTILLAGE","ACHAT","SERVICE","PLOMBERIE"];
@@ -209,7 +218,8 @@ function renderMetrics() {
   document.getElementById("kMois").textContent = eur(mois);
   const budgets = s.budgets || {};
   const agg = {};
-  const atomes = (s2) => (s2 || "").split(/[,+]/).map((x) => x.trim()).filter(Boolean);
+  const atomes = (s2) => (s2 || "").split(/[,+]/).map((x) => x.trim())
+    .filter(Boolean).filter((x) => !ZONES_BANNIES.includes(x.toUpperCase()));
   let sansPiece = 0;
   works.forEach((e) => {
     const ps = atomes(e.piece);
@@ -242,7 +252,7 @@ function renderMetrics() {
     lots.insertAdjacentHTML("beforeend",
       `<div class="lot" style="grid-template-columns:minmax(86px,auto) 1fr auto; opacity:.75">
          <span class="nm" style="color:var(--faint)">SANS PIÈCE</span>
-         <span class="muted" style="align-self:center">outillage, consommables, transverse — voir Par catégorie</span>
+         <span class="muted" style="align-self:center">dépenses transverses — voir Par catégorie</span>
          <span class="amt">${eur(sansPiece)}</span></div>`);
   }
   const last = works[works.length - 1];
@@ -799,6 +809,16 @@ document.getElementById("resetChantier").onclick = () => {
   renderAll();
   maintMsg(n + " ligne(s) chantier effacée(s). Le bouton d'historique réapparaît si vous voulez repartir de vos 352 articles.");
 };
+
+/* ============ Onglets ============ */
+function showTab(t) {
+  document.getElementById("tabMain").style.display = t === "main" ? "grid" : "none";
+  document.getElementById("tabRegl").style.display = t === "regl" ? "grid" : "none";
+  document.getElementById("tabBtnMain").classList.toggle("on", t === "main");
+  document.getElementById("tabBtnRegl").classList.toggle("on", t === "regl");
+}
+document.getElementById("tabBtnMain").onclick = () => showTab("main");
+document.getElementById("tabBtnRegl").onclick = () => showTab("regl");
 
 document.getElementById("jSearch").addEventListener("input", () => { editIdx = null; renderJournal(); });
 
