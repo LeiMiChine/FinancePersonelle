@@ -116,6 +116,14 @@
       <div class="kpi"><div class="l">Total chantier</div><div class="v" id="kTotal">—</div></div>
       <div class="kpi"><div class="l">Ce mois-ci</div><div class="v" id="kMois">—</div></div>
     </div>
+    <div style="margin-top:10px">
+      <div class="l" style="font-family:'Barlow Condensed'; font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--faint)">
+        Consommé vs budgets saisis <span id="kBudDetail" class="mono" style="text-transform:none; letter-spacing:0"></span></div>
+      <div style="display:flex; align-items:center; gap:10px">
+        <div class="gauge" style="flex:1; height:12px; margin:4px 0"><div id="kBudBar" style="height:100%; width:0%"></div></div>
+        <div class="v" id="kBudPct" style="font-family:'IBM Plex Mono'; font-size:20px; font-weight:600; color:var(--amber)">—</div>
+      </div>
+    </div>
     <div id="lots" style="margin-top:10px"></div>
     <div class="muted" id="lastAdd"></div>
   </div>
@@ -162,6 +170,7 @@
       ⬆ Importer une sauvegarde JSON
       <input id="importJson" type="file" accept="application/json,.json" style="display:none" />
     </label>
+    <button class="bigbtn ghost" id="exportCsv" style="margin-top:8px; padding:11px">⬇ Exporter le journal en CSV (Excel)</button>
     <button id="resetChantier" style="margin-top:8px; width:100%; padding:11px; background:none; border:1px solid var(--red); color:var(--red); border-radius:8px; cursor:pointer; font-family:'Barlow Condensed'; font-size:15px; letter-spacing:2px; text-transform:uppercase">
       ⟲ Remise à zéro des dépenses chantier
     </button>
@@ -232,6 +241,18 @@ function renderMetrics() {
   const mois = works.filter((e) => (e.d || "").startsWith(mk)).reduce((a, e) => a + (Number(e.a) || 0), 0);
   document.getElementById("kTotal").textContent = eur(total);
   document.getElementById("kMois").textContent = eur(mois);
+  const budTotal = Object.entries(s.budgets || {}).filter(([k]) => !estBannie(k)).reduce((a2, [, v]) => a2 + (Number(v) || 0), 0);
+  const bp = document.getElementById("kBudPct"), bb = document.getElementById("kBudBar"), bd = document.getElementById("kBudDetail");
+  if (budTotal > 0) {
+    const pctB = (total / budTotal) * 100;
+    const colB = pctB > 100 ? "var(--red)" : pctB > 80 ? "var(--amber)" : "var(--green)";
+    bp.textContent = pctB.toFixed(0) + " %"; bp.style.color = colB;
+    bb.style.width = Math.min(100, pctB) + "%"; bb.style.background = colB;
+    bd.textContent = ` — ${eur(total)} / ${eur(budTotal)}`;
+  } else {
+    bp.textContent = "—"; bb.style.width = "0%";
+    bd.textContent = " — saisissez des budgets dans les jauges ci-dessous";
+  }
   const budgets = s.budgets || {};
   const agg = {};
   const atomes = (s2) => (s2 || "").split(/[,+]/).map((x) => x.trim())
@@ -859,6 +880,27 @@ document.getElementById("exportJson").onclick = () => {
   a.click(); URL.revokeObjectURL(a.href);
   maintMsg("Sauvegarde exportée : pupitre-sauvegarde-" + todayIso() + ".json");
 };
+document.getElementById("exportCsv").onclick = () => {
+  const s = load();
+  const works = (s.expenses || []).filter((e) => e.chantier).slice()
+    .sort((a2, b2) => (a2.d || "").localeCompare(b2.d || ""));
+  const fr = (n) => (n == null || n === "" ? "" : String(Number(n).toFixed(2)).replace(".", ","));
+  const esc = (v) => { v = String(v == null ? "" : v); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const lignes = [["Date", "Article", "Qté", "Coût", "P.U.", "Zones", "Thème", "Catégorie", "Magasin"].join(";")];
+  works.forEach((e) => {
+    const q = Number(e.q) || 1, a = Number(e.a) || 0;
+    const dfr = e.d ? e.d.slice(8) + "/" + e.d.slice(5, 7) + "/" + e.d.slice(0, 4) : "";
+    lignes.push([dfr, esc(e.l), String(q).replace(".", ","), fr(a), q > 0 ? fr(a / q) : "",
+                 esc(e.piece), esc(e.theme), esc(e.cat), esc(e.mag)].join(";"));
+  });
+  const blob = new Blob(["\ufeff" + lignes.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a2 = document.createElement("a");
+  a2.href = URL.createObjectURL(blob);
+  a2.download = "chantier-" + todayIso() + ".csv";
+  a2.click(); URL.revokeObjectURL(a2.href);
+  maintMsg("CSV exporté : " + works.length + " ligne(s) — s'ouvre directement dans Excel.");
+};
+
 document.getElementById("importJson").onchange = (e) => {
   const f = e.target.files[0]; if (!f) return;
   const r = new FileReader();
