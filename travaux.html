@@ -123,12 +123,17 @@
       <input id="zNew" type="text" placeholder="Nouvelle zone (ex : SDB + WC)" style="flex:1; background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--text); font-family:'IBM Plex Mono'; font-size:13px; padding:7px" />
       <button class="chip on" id="zAdd">Ajouter</button>
     </div>
-    <div class="muted" style="margin-top:6px">Renommer une zone met à jour tout l'historique. Supprimer ne touche pas aux données (elles restent visibles dans les jauges).</div>
+    <div class="muted" style="margin-top:6px">Les zones décrivent le LIEU (pièces, groupes de pièces). La nature d'une dépense — outillage, consommable, matériaux, service — se joue dans la Catégorie : une dépense d'outillage se saisit sans zone. Renommer une zone met à jour tout l'historique ; supprimer ne touche pas aux données.</div>
   </div>
 
   <div class="panel">
     <div class="ptitle">Journal — toucher ✎ pour modifier une ligne</div>
     <div id="journal" style="max-height:300px; overflow-y:auto"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ptitle">Par catégorie — la nature des dépenses</div>
+    <div id="cats2"></div>
   </div>
 
   <div class="panel">
@@ -167,8 +172,13 @@
 <script>
 "use strict";
 /* ============ Référentiels (identiques au Pupitre) ============ */
-const ZONES_DEFAUT = ["BUREAU + GRENIER","SDB","CUISINE","CHAMBRE + DRESSING","COULOIR","OUTILS","CONSOMMABLES","TEMPORAIRE"];
-function zones() { const s = load(); return (s.zones && s.zones.length ? s.zones : ZONES_DEFAUT); }
+const ZONES_DEFAUT = ["BUREAU + GRENIER","SDB","CUISINE","CHAMBRE + DRESSING","COULOIR","TEMPORAIRE"];
+function zones() {
+  const s = load();
+  const z = (s.zones && s.zones.length ? s.zones : ZONES_DEFAUT)
+    .filter((x) => !["OUTILS", "CONSOMMABLES"].includes(x));   // la nature d'une dépense = Catégorie, pas Pièce
+  return z.length ? z : ZONES_DEFAUT;
+}
 const CATS = ["MATERIAUX","CONSOMMABLE","OUTILLAGE","ACHAT","SERVICE","PLOMBERIE"];
 const MAGS = ["LEROY MERLIN","TECNOMAT","BRICOMAN","CASTORAMA","LIDL","AMAZON","IKEA","MANOMANO","GEDIMAT","SCIERIE"];
 const KEY = "cockpit-v1";
@@ -197,9 +207,10 @@ function renderMetrics() {
   const budgets = s.budgets || {};
   const agg = {};
   const atomes = (s2) => (s2 || "").split(/[,+]/).map((x) => x.trim()).filter(Boolean);
+  let sansPiece = 0;
   works.forEach((e) => {
     const ps = atomes(e.piece);
-    if (!ps.length) return;
+    if (!ps.length) { sansPiece += Number(e.a) || 0; return; }
     ps.forEach((p) => { agg[p] = (agg[p] || 0) + (Number(e.a) || 0) / ps.length; });
   });
   const lots = document.getElementById("lots");
@@ -224,6 +235,13 @@ function renderMetrics() {
     div.lastElementChild.replaceWith(inp);
     lots.appendChild(div);
   });
+  if (sansPiece > 0) {
+    lots.insertAdjacentHTML("beforeend",
+      `<div class="lot" style="grid-template-columns:minmax(86px,auto) 1fr auto; opacity:.75">
+         <span class="nm" style="color:var(--faint)">SANS PIÈCE</span>
+         <span class="muted" style="align-self:center">outillage, consommables, transverse — voir Par catégorie</span>
+         <span class="amt">${eur(sansPiece)}</span></div>`);
+  }
   const last = works[works.length - 1];
   document.getElementById("lastAdd").textContent = last ? `Dernier ajout : ${last.l || "article"} · ${eur(Number(last.a))} · ${last.piece || "—"}` : "";
 }
@@ -587,6 +605,9 @@ function renderAnalytics() {
   const byMag = {};
   works.forEach((e) => { const m = (e.mag || "(non renseigné)").toUpperCase(); byMag[m] = (byMag[m] || 0) + (Number(e.a) || 0); });
   bars("mags", Object.entries(byMag).sort((a, b) => b[1] - a[1]).slice(0, 8), "var(--blue)");
+  const byCat = {};
+  works.forEach((e) => { const c = (e.cat || "(sans catégorie)").toUpperCase(); byCat[c] = (byCat[c] || 0) + (Number(e.a) || 0); });
+  bars("cats2", Object.entries(byCat).sort((a, b) => b[1] - a[1]), "var(--cyan)");
   const byMonth = {};
   works.forEach((e) => { const k = (e.d || "").slice(0, 7); if (k) byMonth[k] = (byMonth[k] || 0) + (Number(e.a) || 0); });
   const months = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0])).slice(-12)
