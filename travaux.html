@@ -185,6 +185,20 @@
 /* ============ Référentiels (identiques au Pupitre) ============ */
 const ZONES_DEFAUT = ["BUREAU + GRENIER","SDB","CUISINE","CHAMBRE + DRESSING","COULOIR","TEMPORAIRE"];
 const ZONES_BANNIES = ["OUTILS", "OUTIL", "OUTILLAGE", "CONSOMMABLES", "CONSOMMABLE"]; // la nature = Catégorie, jamais Pièce
+const estBannie = (x) => ZONES_BANNIES.includes(String(x || "").toUpperCase().trim());
+function purgerZonesBannies() {
+  const s = load();
+  let modif = false;
+  (s.expenses || []).forEach((e) => {
+    if (!e.piece) return;
+    const propres = e.piece.split(/[,+]/).map((x) => x.trim()).filter(Boolean).filter((x) => !estBannie(x));
+    const nv = propres.join(", ");
+    if (nv !== e.piece) { e.piece = nv; modif = true; }   // la dépense devient transverse (sans pièce) ou garde ses vraies pièces
+  });
+  if (s.budgets) for (const k of Object.keys(s.budgets)) if (estBannie(k)) { delete s.budgets[k]; modif = true; }
+  if (s.zones) { const z = s.zones.filter((x) => !estBannie(x)); if (z.length !== s.zones.length) { s.zones = z; modif = true; } }
+  if (modif) save(s);
+}
 function zones() {
   const s = load();
   const z = (s.zones && s.zones.length ? s.zones : ZONES_DEFAUT)
@@ -209,6 +223,7 @@ function todayIso() {
 const eur = (v) => (v == null || isNaN(v)) ? "—" : v.toLocaleString("fr-FR", { maximumFractionDigits: 0 }) + " €";
 
 /* ============ Métriques ============ */
+let pieceOuverte = null;   // pièce dépliée dans les jauges
 function renderMetrics() {
   const s = load();
   const works = (s.expenses || []).filter((e) => e.chantier);
@@ -230,17 +245,52 @@ function renderMetrics() {
   const lots = document.getElementById("lots");
   lots.innerHTML = "";
   const zoneAtoms = zones().flatMap((z) => z.split(/[,+]/).map((x) => x.trim()).filter(Boolean));
-  const noms = [...new Set([...zoneAtoms, ...Object.keys(agg), ...Object.keys(budgets)])];
+  // lignes contributrices (index absolus pour l'édition)
+  const worksIdx = (s.expenses || []).map((e, i) => ({ e, i })).filter((x) => x.e.chantier);
+  const detailFor = (p) => {
+    const box = document.createElement("div");
+    box.style.cssText = "border:1px solid var(--line); border-top:none; border-radius:0 0 6px 6px; padding:6px 8px 8px; margin:-4px 0 6px; background:var(--panel2)";
+    const contrib = worksIdx.map(({ e, i }) => {
+      const ats = atomes(e.piece);
+      if (p === "__SANS__") { if (ats.length) return null; return { e, i, part: Number(e.a) || 0, n: 1 }; }
+      if (!ats.includes(p)) return null;
+      return { e, i, part: (Number(e.a) || 0) / ats.length, n: ats.length };
+    }).filter(Boolean).sort((a2, b2) => (b2.e.d || "").localeCompare(a2.e.d || ""));
+    const tot = contrib.reduce((s2, c) => s2 + c.part, 0);
+    box.innerHTML = `<div class="muted" style="margin-bottom:4px">${contrib.length} dépense(s) · part totale ${eur(tot)} — toucher ✎ pour corriger</div>`;
+    contrib.slice(0, 40).forEach(({ e, i, part, n }) => {
+      const row = document.createElement("div");
+      row.className = "lot"; row.style.gridTemplateColumns = "auto 1fr auto auto auto";
+      row.innerHTML = `<span class="amt">${(e.d || "").slice(8)}/${(e.d || "").slice(5, 7)}/${(e.d || "").slice(2, 4)}</span>
+        <span class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(e.l || "—").slice(0, 32)}</span>
+        <span class="mono" style="font-size:10px;color:var(--faint)">${(e.mag || "").slice(0, 10)}</span>
+        <span class="mono" style="font-size:12px;color:var(--amber)">${part.toFixed(2)} €${n > 1 ? " <span style='color:var(--faint)'>(1/" + n + ")</span>" : ""}</span>
+        <button class="del" style="color:var(--amber)">✎</button>`;
+      row.lastElementChild.onclick = () => {
+        document.getElementById("jSearch").value = (e.l || "").slice(0, 24);
+        editIdx = i;
+        showTab("regl");
+        renderJournal();
+      };
+      box.appendChild(row);
+    });
+    if (contrib.length > 40) box.insertAdjacentHTML("beforeend", `<div class="muted">… et ${contrib.length - 40} autres (voir Journal)</div>`);
+    return box;
+  };
+
+  const noms = [...new Set([...zoneAtoms, ...Object.keys(agg), ...Object.keys(budgets)])].filter((x) => !estBannie(x));
   noms.forEach((p) => {
     const reel = agg[p] || 0, bud = Number(budgets[p]) || 0;
     if (!reel && !bud && !zoneAtoms.includes(p)) return;
     const pct = bud > 0 ? Math.min(100, (reel / bud) * 100) : (reel > 0 ? 100 : 0);
     const col = bud > 0 && reel > bud ? "var(--red)" : pct > 90 && bud > 0 ? "var(--amber)" : "var(--green)";
+    const ouverte = pieceOuverte === p;
     const div = document.createElement("div");
     div.className = "lot"; div.style.gridTemplateColumns = "minmax(86px,auto) 1fr auto 74px";
-    div.innerHTML = `<span class="nm">${p}</span>
+    div.innerHTML = `<span class="nm" style="cursor:pointer; color:${ouverte ? "var(--amber)" : "inherit"}">${ouverte ? "▾ " : "▸ "}${p}</span>
        <div class="gauge"><div style="width:${pct}%;background:${col}"></div></div>
        <span class="amt">${eur(reel)} /</span><span></span>`;
+    div.querySelector(".nm").onclick = () => { pieceOuverte = ouverte ? null : p; renderMetrics(); };
     const inp = document.createElement("input");
     inp.type = "number"; inp.value = bud || "";
     inp.placeholder = "budget";
@@ -248,13 +298,18 @@ function renderMetrics() {
     inp.onchange = () => { const s2 = load(); s2.budgets = s2.budgets || {}; s2.budgets[p] = Number(inp.value) || 0; save(s2); renderMetrics(); };
     div.lastElementChild.replaceWith(inp);
     lots.appendChild(div);
+    if (ouverte) lots.appendChild(detailFor(p));
   });
   if (sansPiece > 0) {
-    lots.insertAdjacentHTML("beforeend",
-      `<div class="lot" style="grid-template-columns:minmax(86px,auto) 1fr auto; opacity:.75">
-         <span class="nm" style="color:var(--faint)">SANS PIÈCE</span>
+    const ouverte = pieceOuverte === "__SANS__";
+    const div = document.createElement("div");
+    div.className = "lot"; div.style.cssText += "grid-template-columns:minmax(86px,auto) 1fr auto; opacity:.85";
+    div.innerHTML = `<span class="nm" style="color:var(--faint); cursor:pointer">${ouverte ? "▾ " : "▸ "}SANS PIÈCE</span>
          <span class="muted" style="align-self:center">dépenses transverses — voir Par catégorie</span>
-         <span class="amt">${eur(sansPiece)}</span></div>`);
+         <span class="amt">${eur(sansPiece)}</span>`;
+    div.querySelector(".nm").onclick = () => { pieceOuverte = ouverte ? null : "__SANS__"; renderMetrics(); };
+    lots.appendChild(div);
+    if (ouverte) lots.appendChild(detailFor("__SANS__"));
   }
   const last = works[works.length - 1];
   document.getElementById("lastAdd").textContent = last ? `Dernier ajout : ${last.l || "article"} · ${eur(Number(last.a))} · ${last.piece || "—"}` : "";
@@ -709,7 +764,7 @@ function renderJournal() {
       };
       const pieceOpts = [...new Set([
         ...zones(),
-        ...(e.piece || "").split(/[,+]/).map((x) => x.trim()).filter(Boolean),   // les pièces historiques de la ligne restent visibles
+        ...(e.piece || "").split(/[,+]/).map((x) => x.trim()).filter(Boolean).filter((x) => !estBannie(x)),
       ])];
       const themeOpts = [...new Set([...THEMES, ...(e.theme || "").split(",").map((x) => x.trim()).filter(Boolean)])];
       mkMulti("ePieces", pieceOpts, e.piece);
@@ -810,6 +865,7 @@ document.getElementById("importJson").onchange = (e) => {
       if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("format inattendu");
       if (!window.confirm("Remplacer TOUTES les données actuelles (chantier + finances) par cette sauvegarde ?")) return;
       localStorage.setItem(KEY, JSON.stringify(data));
+      purgerZonesBannies();
       editIdx = null;
       renderAll();
       maintMsg("Sauvegarde restaurée : " + ((data.expenses || []).filter((x) => x.chantier).length) + " ligne(s) chantier.");
@@ -841,6 +897,8 @@ document.getElementById("tabBtnMain").onclick = () => showTab("main");
 document.getElementById("tabBtnRegl").onclick = () => showTab("regl");
 
 document.getElementById("jSearch").addEventListener("input", () => { editIdx = null; renderJournal(); });
+
+purgerZonesBannies();
 
 function renderAll() { renderMetrics(); renderHisto(); renderBank(); renderAnalytics(); renderJournal(); mMagsUI.render(); qMagsUI.render(); piecesUI.render(); qPiecesUI.render(); renderZones(); }
 renderAll();
