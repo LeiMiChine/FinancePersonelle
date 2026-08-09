@@ -128,7 +128,10 @@
 
   <div class="panel">
     <div class="ptitle">Journal — toucher ✎ pour modifier une ligne</div>
-    <div id="journal" style="max-height:300px; overflow-y:auto"></div>
+    <input id="jSearch" type="search" placeholder="Rechercher : article, magasin, zone, catégorie, date…"
+      style="width:100%; margin-bottom:8px; background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--text); font-family:'IBM Plex Mono'; font-size:13px; padding:8px" />
+    <div id="jCount" class="muted" style="margin-bottom:4px"></div>
+    <div id="journal" style="max-height:340px; overflow-y:auto"></div>
   </div>
 
   <div class="panel">
@@ -612,7 +615,21 @@ function renderAnalytics() {
   works.forEach((e) => { const k = (e.d || "").slice(0, 7); if (k) byMonth[k] = (byMonth[k] || 0) + (Number(e.a) || 0); });
   const months = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0])).slice(-12)
     .map(([k, v]) => [k.slice(5, 7) + "/" + k.slice(2, 4), v]);
-  bars("timeline", months, "var(--amber)");
+  const tl = document.getElementById("timeline");
+  const maxM = Math.max(...months.map(([, v]) => v), 1);
+  tl.innerHTML = "";
+  tl.style.cssText = "display:flex; align-items:flex-end; gap:4px; height:150px; padding-top:14px";
+  months.forEach(([label, v]) => {
+    const col = document.createElement("div");
+    col.style.cssText = "flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; min-width:0";
+    const amt = v >= 1000 ? (v / 1000).toFixed(1).replace(".", ",") + "k" : Math.round(v);
+    col.innerHTML = `
+      <div style="font-family:'IBM Plex Mono'; font-size:9px; color:var(--dim); margin-bottom:2px; white-space:nowrap">${amt}</div>
+      <div title="${label} : ${eur(v)}" style="width:100%; max-width:34px; height:${Math.max(3, (v / maxM) * 100)}%; background:var(--amber); border-radius:3px 3px 0 0"></div>
+      <div style="font-family:'Barlow Condensed'; font-size:10px; letter-spacing:.5px; color:var(--faint); margin-top:4px; white-space:nowrap">${label}</div>`;
+    tl.appendChild(col);
+  });
+  if (!months.length) tl.innerHTML = '<div class="muted">Aucune donnée.</div>';
 }
 
 /* ============ Journal éditable ============ */
@@ -620,7 +637,16 @@ let editIdx = null;
 function renderJournal() {
   const s = load();
   const all = s.expenses || [];
-  const works = all.map((e, i) => ({ e, i })).filter((x) => x.e.chantier).reverse().slice(0, 80);
+  const q = (document.getElementById("jSearch").value || "").trim().toLowerCase();
+  let works = all.map((e, i) => ({ e, i })).filter((x) => x.e.chantier).reverse();
+  const total = works.length;
+  if (q) {
+    works = works.filter(({ e }) =>
+      [e.l, e.mag, e.piece, e.cat, e.d, String(e.a)].some((v) => (v || "").toLowerCase().includes(q)));
+  }
+  document.getElementById("jCount").textContent =
+    q ? `${works.length} résultat(s) sur ${total} lignes` : `${total} ligne(s) — les 100 plus récentes affichées, recherchez pour trouver les autres`;
+  works = works.slice(0, 100);
   const el = document.getElementById("journal");
   el.innerHTML = "";
   works.forEach(({ e, i }) => {
@@ -773,6 +799,8 @@ document.getElementById("resetChantier").onclick = () => {
   renderAll();
   maintMsg(n + " ligne(s) chantier effacée(s). Le bouton d'historique réapparaît si vous voulez repartir de vos 352 articles.");
 };
+
+document.getElementById("jSearch").addEventListener("input", () => { editIdx = null; renderJournal(); });
 
 function renderAll() { renderMetrics(); renderHisto(); renderBank(); renderAnalytics(); renderJournal(); mMagsUI.render(); qMagsUI.render(); piecesUI.render(); qPiecesUI.render(); renderZones(); }
 renderAll();
