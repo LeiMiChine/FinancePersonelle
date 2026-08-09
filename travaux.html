@@ -681,15 +681,46 @@ function renderBank() {
 }
 
 /* ============ Fournisseurs & timeline ============ */
-function bars(elId, entries, color) {
+let axeOuvert = { cats2: null, mags: null };   // barre dépliée par panneau
+function expandBars(elId, entries, color, matchFn, autreDim) {
   const el = document.getElementById(elId);
   el.innerHTML = "";
+  const s = load();
+  const worksIdx = (s.expenses || []).map((e, i) => ({ e, i })).filter((x) => x.e.chantier);
   const max = Math.max(...entries.map(([, v]) => v), 1);
   entries.forEach(([label, v]) => {
-    el.insertAdjacentHTML("beforeend",
-      `<div class="lot"><span class="nm" style="font-size:12px">${label}</span>
+    const ouverte = axeOuvert[elId] === label;
+    const row = document.createElement("div");
+    row.className = "lot";
+    row.innerHTML = `<span class="nm" style="font-size:12px; cursor:pointer; color:${ouverte ? "var(--amber)" : "inherit"}">${ouverte ? "▾ " : "▸ "}${label}</span>
        <div class="gauge"><div style="width:${(v / max) * 100}%;background:${color}"></div></div>
-       <span class="amt">${eur(v)}</span></div>`);
+       <span class="amt">${eur(v)}</span>`;
+    row.querySelector(".nm").onclick = () => { axeOuvert[elId] = ouverte ? null : label; renderAnalytics(); };
+    el.appendChild(row);
+    if (!ouverte) return;
+    const contrib = worksIdx.filter(({ e }) => matchFn(e, label))
+      .sort((a2, b2) => (b2.e.d || "").localeCompare(a2.e.d || ""));
+    const box = document.createElement("div");
+    box.style.cssText = "border:1px solid var(--line); border-radius:0 0 6px 6px; padding:6px 8px 8px; margin:0 0 6px; background:var(--panel2)";
+    box.innerHTML = `<div class="muted" style="margin-bottom:4px">${contrib.length} dépense(s) · total ${eur(contrib.reduce((t, c) => t + (Number(c.e.a) || 0), 0))} — toucher ✎ pour corriger</div>`;
+    contrib.slice(0, 40).forEach(({ e, i }) => {
+      const r2 = document.createElement("div");
+      r2.className = "lot"; r2.style.gridTemplateColumns = "auto 1fr auto auto auto";
+      r2.innerHTML = `<span class="amt">${(e.d || "").slice(8)}/${(e.d || "").slice(5, 7)}/${(e.d || "").slice(2, 4)}</span>
+        <span class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(e.l || "—").slice(0, 32)}</span>
+        <span class="mono" style="font-size:10px;color:var(--faint)">${(autreDim(e) || "").slice(0, 12)}</span>
+        <span class="mono" style="font-size:12px;color:var(--amber)">${(Number(e.a) || 0).toFixed(2)} €</span>
+        <button class="del" style="color:var(--amber)">✎</button>`;
+      r2.lastElementChild.onclick = () => {
+        document.getElementById("jSearch").value = (e.l || "").slice(0, 24);
+        editIdx = i;
+        showTab("regl");
+        renderJournal();
+      };
+      box.appendChild(r2);
+    });
+    if (contrib.length > 40) box.insertAdjacentHTML("beforeend", `<div class="muted">… et ${contrib.length - 40} autres (voir Journal)</div>`);
+    el.appendChild(box);
   });
 }
 function renderAnalytics() {
@@ -697,10 +728,14 @@ function renderAnalytics() {
   const works = (s.expenses || []).filter((e) => e.chantier);
   const byMag = {};
   works.forEach((e) => { const m = (e.mag || "(non renseigné)").toUpperCase(); byMag[m] = (byMag[m] || 0) + (Number(e.a) || 0); });
-  bars("mags", Object.entries(byMag).sort((a, b) => b[1] - a[1]).slice(0, 8), "var(--blue)");
+  expandBars("mags", Object.entries(byMag).sort((a, b) => b[1] - a[1]).slice(0, 8), "var(--blue)",
+    (e, label) => (e.mag || "(non renseigné)").toUpperCase() === label,
+    (e) => e.piece || e.cat);
   const byCat = {};
   works.forEach((e) => { const c = (e.cat || "(sans catégorie)").toUpperCase(); byCat[c] = (byCat[c] || 0) + (Number(e.a) || 0); });
-  bars("cats2", Object.entries(byCat).sort((a, b) => b[1] - a[1]), "var(--cyan)");
+  expandBars("cats2", Object.entries(byCat).sort((a, b) => b[1] - a[1]), "var(--cyan)",
+    (e, label) => (e.cat || "(sans catégorie)").toUpperCase() === label,
+    (e) => e.mag || e.piece);
   const byMonth = {};
   works.forEach((e) => { const k = (e.d || "").slice(0, 7); if (k) byMonth[k] = (byMonth[k] || 0) + (Number(e.a) || 0); });
   const months = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0])).slice(-12)
