@@ -278,10 +278,13 @@ function renderMetrics() {
     return box;
   };
 
-  const noms = [...new Set([...zoneAtoms, ...Object.keys(agg), ...Object.keys(budgets)])].filter((x) => !estBannie(x));
+  const noms = [...new Set([...zoneAtoms, ...Object.keys(agg), ...Object.keys(budgets)])].filter((x) => !estBannie(x))
+    .map((p) => ({ p, reel: agg[p] || 0, bud: Number(budgets[p]) || 0 }))
+    .filter(({ p, reel, bud }) => reel || bud || zoneAtoms.includes(p))
+    .sort((a2, b2) => (b2.reel - a2.reel) || (b2.bud - a2.bud) || a2.p.localeCompare(b2.p))
+    .map(({ p }) => p);
   noms.forEach((p) => {
     const reel = agg[p] || 0, bud = Number(budgets[p]) || 0;
-    if (!reel && !bud && !zoneAtoms.includes(p)) return;
     const pct = bud > 0 ? Math.min(100, (reel / bud) * 100) : (reel > 0 ? 100 : 0);
     const col = bud > 0 && reel > bud ? "var(--red)" : pct > 90 && bud > 0 ? "var(--amber)" : "var(--green)";
     const ouverte = pieceOuverte === p;
