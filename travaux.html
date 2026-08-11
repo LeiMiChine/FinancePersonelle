@@ -423,22 +423,40 @@ const mMagsUI = magChips("mMags", "mMag");
 const qMagsUI = magChips("qMags", null);
 
 /* ============ OCR + parsing ticket ============ */
+/* Dates : format FRANÇAIS d'abord (09/08 = 9 août), lignes à mot-clé prioritaires, validation stricte */
+function extraireDate(text) {
+  const rx = /(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/g;
+  let best = null;
+  for (const l of text.split(/\n/)) {
+    for (const m of l.matchAll(rx)) {
+      const d1 = parseInt(m[1], 10), d2 = parseInt(m[2], 10);
+      const y = m[3].length === 2 ? "20" + m[3] : m[3];
+      if (+y < 2000 || +y > 2100) continue;
+      let dd, mm;
+      if (d2 >= 1 && d2 <= 12) { dd = d1; mm = d2; }        // lecture française JJ/MM
+      else if (d1 >= 1 && d1 <= 12) { dd = d2; mm = d1; }   // format US imprimé (mois > 12 impossible)
+      else continue;
+      if (dd < 1 || dd > 31) continue;
+      const iso = `${y}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+      const score = /date|[ée]mission|vente|factur|achat|caisse|le\s+\d/i.test(l) ? 2 : 1;
+      if (!best || score > best.score) best = { iso, score };
+      if (best.score === 2) return best.iso;
+    }
+  }
+  return best ? best.iso : "";
+}
+
 const EXCLUDE = /TOTAL|TVA|CARTE|\bCB\b|ESPECE|RENDU|MONTANT|SOUS.TOT|A PAYER|MERCI|SIRET|TEL|WWW|FIDELIT|REMISE GLOB|HT\b|TTC\b/i;
 function parseTicket(text) {
   const lines = text.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 2);
   const items = [];
-  let mag = "", date = "";
-  const dm = text.match(/(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})/);
-  if (dm) {
-    let y = dm[3].length === 2 ? "20" + dm[3] : dm[3];
-    date = `${y}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`;
-  }
+  let mag = "", date = extraireDate(text);
   for (const m of MAGS) if (text.toUpperCase().includes(m.split(" ")[0])) { mag = m; break; }
   for (const l of lines) {
     if (EXCLUDE.test(l)) continue;
     // "2 X 3,99" ou "x2" → quantité
     let q = 1, rest = l;
-    const qm = l.match(/(\d{1,2})\s*[xX×]\s*(\d+[.,]\d{2})/);
+    const qm = l.match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*[xX×*]\s*(\d+[.,]\d{2})/);
     const pm = l.match(/(?:^|\s)(\d{1,3}(?:[\u00a0\s.,]?\d{3})*[.,]\d{2})\s*€?\s*$/);
     if (!pm) continue;
     const norm = (t) => {
@@ -448,16 +466,32 @@ function parseTicket(text) {
       return parseFloat(t);
     };
     let price = norm(pm[1]);
-    // Queue numérique tabulaire (factures en colonnes : PU HT | Qté | Net HT | TVA | PU TTC | TTC)
+    // Queue numérique (tous gabarits de colonnes) : la quantité est le nombre qui,
+    // multiplié par un autre de la queue, redonne le montant final (q × PU ≈ total)
     const toks = l.split(/\s+/);
     let tailStart = toks.length;
     while (tailStart > 0 && /^[\d.,€]+$/.test(toks[tailStart - 1])) tailStart--;
-    const tail = toks.slice(tailStart).filter((t) => t !== "€");
-    if (tail.length >= 4 && /^\d{1,3}$/.test(tail[1])) {
-      q = parseInt(tail[1], 10) || 1;               // colonne Qté juste après le prix unitaire
-      rest = toks.slice(0, tailStart).join(" ");    // libellé = tout avant la queue de chiffres
+    const tail = toks.slice(tailStart).filter((t) => t !== "€").map(norm).filter((n2) => !isNaN(n2) && n2 > 0);
+    if (tail.length >= 3) {
+      const cible = tail[tail.length - 1];
+      const tol = Math.max(0.02, cible * 0.006);
+      let meilleur = null;
+      for (let i2 = 0; i2 < tail.length - 1; i2++) {
+        for (let j2 = 0; j2 < tail.length - 1; j2++) {
+          if (i2 === j2) continue;
+          const cq = tail[i2], cpu = tail[j2];
+          if (cq > 9999) continue;
+          if (Math.abs(cq * cpu - cible) > tol) continue;
+          const scoreQ = (Number.isInteger(cq) ? 2 : Number.isInteger(cq * 4) ? 1 : 0) + (cq <= 500 ? 1 : 0) + (cq <= cpu ? 0.5 : 0);
+          if (!meilleur || scoreQ > meilleur.scoreQ) meilleur = { q: cq, scoreQ };
+        }
+      }
+      if (meilleur && meilleur.q !== cible) {
+        q = meilleur.q;
+        rest = toks.slice(0, tailStart).join(" ");   // libellé = tout avant la queue de chiffres
+      }
     }
-    if (qm) { q = parseInt(qm[1]); }
+    if (qm) { q = norm(qm[1]) || 1; }
     if (isNaN(price) || price <= 0 || price > 50000) continue;
     let label;
     if (rest !== l) {
