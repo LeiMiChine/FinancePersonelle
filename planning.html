@@ -131,6 +131,7 @@ textarea{min-height:60px;resize:vertical}
 .chip-zone{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:5px 6px 5px 12px;font-size:12px;display:inline-flex;align-items:center;gap:6px}
 .chip-zone button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:2px 6px;line-height:1}
 .chip-zone button:hover{color:var(--red)}
+.chip-cat-dot{width:8px;height:8px;border-radius:50%;flex:none}
 .btn{background:var(--amber);color:#241705;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:700;width:100%;margin-top:14px;cursor:pointer}
 .btn.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
 .btn.small{width:auto;padding:8px 14px;font-size:12px;margin-top:0}
@@ -242,6 +243,15 @@ textarea{min-height:60px;resize:vertical}
     </div>
 
     <div class="card">
+      <h2>Catégories</h2>
+      <div class="chips" id="catMgrChips" style="margin-bottom:10px"></div>
+      <div class="row2">
+        <input type="text" id="newCatInput" placeholder="Ex: Ménage">
+        <button class="btn small" id="btnAddCat" style="width:auto">Ajouter</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Données</h2>
       <button class="btn secondary" id="btnExport">Exporter (JSON)</button>
       <button class="btn secondary" id="btnImport">Importer (JSON)</button>
@@ -298,9 +308,26 @@ textarea{min-height:60px;resize:vertical}
 
 <script>
 const STORAGE_KEY = 'planningNazarethV1';
+const DEFAULT_CATEGORIES = [
+  {id:'achat',       label:'Achat',        color:'#9aa1b0'},
+  {id:'demolition',  label:'Démolition',   color:'#e5615a'},
+  {id:'evacuation',  label:'Évacuation',   color:'#c77b3a'},
+  {id:'maconnerie',  label:'Maçonnerie',   color:'#8a8f9a'},
+  {id:'plomberie',   label:'Plomberie',    color:'#5b8def'},
+  {id:'electricite', label:'Électricité',  color:'#f0d43b'},
+  {id:'placo',       label:'Placo / cloisons', color:'#c9a876'},
+  {id:'isolation',   label:'Isolation',    color:'#7fc9a0'},
+  {id:'menuiserie',  label:'Menuiserie',   color:'#b98a5a'},
+  {id:'carrelage',   label:'Carrelage',    color:'#6fa8dc'},
+  {id:'peinture',    label:'Peinture',     color:'#c07ad4'},
+  {id:'menage',      label:'Ménage',       color:'#4fc3c7'},
+  {id:'finitions',   label:'Finitions',    color:'#3fb27f'},
+  {id:'divers',      label:'Divers',       color:'#7a8290'}
+];
 const DEFAULT_STATE = {
   settings: { startDate: todayISO(), samedi: false, dimanche: true, feries: [],
-    zones: ["Cuisine","Salon / séjour","Chambre","Salle de bain","WC","Couloir / entrée","Extérieur","Général"] },
+    zones: ["Cuisine","Salon / séjour","Chambre","Salle de bain","WC","Couloir / entrée","Extérieur","Général"],
+    categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)) },
   tasks: [],
   sync: { apiKey: '', databaseURL: '', room: '' },
   updatedAt: 0,
@@ -317,9 +344,17 @@ function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
 function load(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
-    if(!raw) return deepClone(DEFAULT_STATE);
-    const parsed = JSON.parse(raw);
-    return Object.assign(deepClone(DEFAULT_STATE), parsed);
+    let result;
+    if(!raw){ result = deepClone(DEFAULT_STATE); }
+    else{
+      const parsed = JSON.parse(raw);
+      result = Object.assign(deepClone(DEFAULT_STATE), parsed);
+    }
+    // rattrapage pour les sauvegardes faites avant l'ajout des catégories éditables
+    if(!result.settings.categories || !result.settings.categories.length){
+      result.settings.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+    }
+    return result;
   }catch(e){ return deepClone(DEFAULT_STATE); }
 }
 function save(){
@@ -525,25 +560,20 @@ function computeSchedule(){
 /* ---------------- Rendu ---------------- */
 const STATUT_LABEL = {a_faire:'À faire', en_cours:'En cours', fait:'Terminée', bloque:'Bloquée'};
 
-const CATEGORIES = [
-  {id:'achat',       label:'Achat',        color:'#9aa1b0'},
-  {id:'demolition',  label:'Démolition',   color:'#e5615a'},
-  {id:'evacuation',  label:'Évacuation',   color:'#c77b3a'},
-  {id:'maconnerie',  label:'Maçonnerie',   color:'#8a8f9a'},
-  {id:'plomberie',   label:'Plomberie',    color:'#5b8def'},
-  {id:'electricite', label:'Électricité',  color:'#f0d43b'},
-  {id:'placo',       label:'Placo / cloisons', color:'#c9a876'},
-  {id:'isolation',   label:'Isolation',    color:'#7fc9a0'},
-  {id:'menuiserie',  label:'Menuiserie',   color:'#b98a5a'},
-  {id:'carrelage',   label:'Carrelage',    color:'#6fa8dc'},
-  {id:'peinture',    label:'Peinture',     color:'#c07ad4'},
-  {id:'finitions',   label:'Finitions',    color:'#3fb27f'},
-  {id:'divers',      label:'Divers',       color:'#7a8290'}
-];
-function catInfo(id){ return CATEGORIES.find(c=>c.id===id) || {id:'divers', label:'Non classée', color:'#7a8290'}; }
+const NEW_CATEGORY_PALETTE = ['#e5615a','#c77b3a','#8a8f9a','#5b8def','#f0d43b','#c9a876','#7fc9a0','#b98a5a','#6fa8dc','#c07ad4','#4fc3c7','#3fb27f','#9aa1b0'];
+function catList(){ return (state.settings.categories && state.settings.categories.length) ? state.settings.categories : DEFAULT_CATEGORIES; }
+function catInfo(id){ return catList().find(c=>c.id===id) || {id:'divers', label:'Non classée', color:'#7a8290'}; }
 function populateCategorySelect(){
   const sel = document.getElementById('fCategorie');
-  sel.innerHTML = CATEGORIES.map(c=>'<option value="'+c.id+'">'+c.label+'</option>').join('');
+  sel.innerHTML = catList().map(c=>'<option value="'+c.id+'">'+c.label+'</option>').join('');
+}
+function slugifyId(label){
+  let s = label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  if(!s) s = 'categorie';
+  const existingIds = new Set(catList().map(c=>c.id));
+  let base = s, i = 1;
+  while(existingIds.has(s)){ i++; s = base+'_'+i; }
+  return s;
 }
 /* ---------------- Pièces (propres au Planning, indépendantes de Chantier Nazareth Express) ---------------- */
 function populateZoneChips(selectedZones){
@@ -595,6 +625,7 @@ function render(){
   renderCriticalPath(sched);
   renderTaskList(sched);
   renderZoneManager();
+  renderCatManager();
   renderPieces(sched);
 }
 
@@ -810,7 +841,7 @@ function renderTaskList(sched){
         zones.map(z=>'<option value="'+escapeHtmlAttr(z)+'"'+(z===filterZone?' selected':'')+'>'+escapeHtml(z)+'</option>').join('')+
       '</select>'+
       '<select id="filterCatSel"><option value="">Toutes les catégories</option>'+
-        CATEGORIES.filter(c=>usedCats.includes(c.id)).map(c=>'<option value="'+c.id+'"'+(c.id===filterCat?' selected':'')+'>'+c.label+'</option>').join('')+
+        catList().filter(c=>usedCats.includes(c.id)).map(c=>'<option value="'+c.id+'"'+(c.id===filterCat?' selected':'')+'>'+c.label+'</option>').join('')+
       '</select>'+
     '</div>'+
     '<div class="sort-toggle">'+
@@ -1087,6 +1118,7 @@ function loadSettingsForm(){
   document.getElementById('syncDbUrl').value = (state.sync && state.sync.databaseURL) || '';
   document.getElementById('syncRoom').value = (state.sync && state.sync.room) || '';
   renderZoneManager();
+  renderCatManager();
 }
 function renderZoneManager(){
   const holder = document.getElementById('zoneMgrChips');
@@ -1100,7 +1132,7 @@ function renderZoneManager(){
     const enUsage = state.tasks.some(t=>taskZones(t).includes(z));
     if(enUsage && !confirm('« '+z+' » est utilisée par au moins une tâche. La supprimer de la liste quand même ? Les tâches concernées garderont cette pièce.')) return;
     state.settings.zones = state.settings.zones.filter(x=>x!==z);
-    save(); renderZoneManager();
+    save(); render();
   }));
 }
 document.getElementById('btnAddZone').addEventListener('click', ()=>{
@@ -1109,10 +1141,42 @@ document.getElementById('btnAddZone').addEventListener('click', ()=>{
   if(!val) return;
   if(!state.settings.zones.includes(val)) state.settings.zones.push(val);
   input.value='';
-  save(); renderZoneManager();
+  save(); render();
 });
 document.getElementById('newZoneInput').addEventListener('keydown', e=>{
   if(e.key==='Enter') document.getElementById('btnAddZone').click();
+});
+
+function renderCatManager(){
+  const holder = document.getElementById('catMgrChips');
+  const cats = catList();
+  if(cats.length===0){ holder.innerHTML='<span style="font-size:12px;color:var(--muted)">Aucune catégorie enregistrée.</span>'; return; }
+  holder.innerHTML = cats.map(c=>
+    '<span class="chip-zone"><span class="chip-cat-dot" style="background:'+c.color+'"></span>'+escapeHtml(c.label)+
+    '<button data-del-cat="'+escapeHtmlAttr(c.id)+'" title="Supprimer">×</button></span>'
+  ).join('');
+  holder.querySelectorAll('[data-del-cat]').forEach(b=>b.addEventListener('click', ()=>{
+    const id = b.dataset.delCat;
+    const cat = catList().find(c=>c.id===id);
+    const enUsage = state.tasks.some(t=>t.categorie===id);
+    if(enUsage && !confirm('« '+(cat?cat.label:id)+' » est utilisée par au moins une tâche. La supprimer de la liste quand même ? Les tâches concernées garderont cette catégorie (affichée comme « Non classée »).')) return;
+    state.settings.categories = catList().filter(c=>c.id!==id);
+    save(); render();
+  }));
+}
+document.getElementById('btnAddCat').addEventListener('click', ()=>{
+  const input = document.getElementById('newCatInput');
+  const label = input.value.trim();
+  if(!label) return;
+  if(!state.settings.categories) state.settings.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+  const id = slugifyId(label);
+  const color = NEW_CATEGORY_PALETTE[state.settings.categories.length % NEW_CATEGORY_PALETTE.length];
+  state.settings.categories.push({id, label, color});
+  input.value='';
+  save(); render();
+});
+document.getElementById('newCatInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter') document.getElementById('btnAddCat').click();
 });
 document.getElementById('btnSaveSettings').addEventListener('click', ()=>{
   state.settings.startDate = document.getElementById('setStart').value || todayISO();
@@ -1164,4 +1228,3 @@ document.addEventListener('click', (e)=>{
 </script>
 </body>
 </html>
-
