@@ -86,6 +86,9 @@ main{padding:14px 12px;max-width:920px;margin:0 auto}
 .sort-toggle{display:flex;gap:6px;margin-bottom:14px}
 .sort-toggle button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:7px 4px;font-size:12px;font-weight:600;cursor:pointer}
 .sort-toggle button.on{background:var(--amber-dim);border-color:var(--amber);color:var(--amber)}
+.done-toggle-wrap{margin-top:14px}
+.done-toggle{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px;text-align:left}
+.done-toggle:hover{color:var(--text)}
 
 .piece-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:10px}
 .piece-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
@@ -169,7 +172,11 @@ textarea{min-height:60px;resize:vertical}
     </div>
 
     <div class="card" id="todayCard">
-      <h2>Aujourd'hui — <span id="todayDateLabel"></span></h2>
+      <h2 id="todayCardTitle">Aujourd'hui — <span id="todayDateLabel"></span></h2>
+      <div class="sort-toggle" style="margin-bottom:12px">
+        <button data-today-mode="jour" class="on">Aujourd'hui</button>
+        <button data-today-mode="semaine">Cette semaine</button>
+      </div>
       <div id="todayHolder"></div>
     </div>
 
@@ -616,6 +623,7 @@ function taskZones(t){
 let filterZone = '';
 let filterCat = '';
 let sortMode = 'date'; // 'date' = trié automatiquement, 'manuel' = ordre libre par flèches
+let doneCollapsed = true;
 
 function render(){
   const sched = computeSchedule();
@@ -630,30 +638,26 @@ function render(){
   renderPieces(sched);
 }
 
+let todayMode = 'jour';
+
 function renderToday(sched){
-  const label = document.getElementById('todayDateLabel');
+  const title = document.getElementById('todayCardTitle');
   const today = new Date(); today.setHours(0,0,0,0);
-  label.textContent = today.toLocaleDateString('fr-FR',{weekday:'long', day:'2-digit', month:'long'});
+  const todayLabelText = today.toLocaleDateString('fr-FR',{weekday:'long', day:'2-digit', month:'long'});
+  title.innerHTML = todayMode==='jour' ? 'Aujourd\'hui — <span id="todayDateLabel">'+todayLabelText+'</span>' : 'Cette semaine';
 
   const holder = document.getElementById('todayHolder');
   if(state.tasks.length===0){ holder.innerHTML='<div class="empty">Aucune tâche pour l\'instant.</div>'; return; }
   if(sched.error){ holder.innerHTML=''; return; }
 
   const todayStr = todayISO();
-  const starting=[], ending=[], late=[];
+  const late = [];
   state.tasks.forEach(t=>{
     if(t.statut==='fait') return;
     const info = sched.byId ? sched.byId[t.id] : null;
     if(!info) return;
-    if(isoOf(info.startDate)===todayStr) starting.push(t);
-    if(isoOf(info.endDate)===todayStr) ending.push(t);
     if(info.endDate < today) late.push(t);
   });
-
-  if(starting.length===0 && ending.length===0 && late.length===0){
-    holder.innerHTML = '<div class="empty">Rien de prévu aujourd\'hui — tout est à jour. 👍</div>';
-    return;
-  }
 
   function group(title, tasks, warn){
     if(tasks.length===0) return '';
@@ -664,13 +668,60 @@ function renderToday(sched){
     '</div>';
   }
 
-  holder.innerHTML =
-    group('⚠ En retard', late, true) +
-    group('▶ Démarrent aujourd\'hui', starting) +
-    group('■ Se terminent aujourd\'hui (prévu)', ending);
+  let html = group('⚠ En retard', late, true);
 
+  if(todayMode==='jour'){
+    const starting=[], ending=[];
+    state.tasks.forEach(t=>{
+      if(t.statut==='fait') return;
+      const info = sched.byId ? sched.byId[t.id] : null;
+      if(!info) return;
+      if(isoOf(info.startDate)===todayStr) starting.push(t);
+      if(isoOf(info.endDate)===todayStr) ending.push(t);
+    });
+    html += group('▶ Démarrent aujourd\'hui', starting) + group('■ Se terminent aujourd\'hui (prévu)', ending);
+    if(late.length===0 && starting.length===0 && ending.length===0){
+      holder.innerHTML = '<div class="empty">Rien de prévu aujourd\'hui — tout est à jour. 👍</div>';
+      return;
+    }
+  } else {
+    let anyDay = false;
+    for(let offset=0; offset<7; offset++){
+      const d = new Date(today); d.setDate(d.getDate()+offset);
+      const dStr = isoOf(d);
+      const items = [];
+      state.tasks.forEach(t=>{
+        if(t.statut==='fait') return;
+        const info = sched.byId ? sched.byId[t.id] : null;
+        if(!info) return;
+        const startsHere = isoOf(info.startDate)===dStr;
+        const endsHere = isoOf(info.endDate)===dStr;
+        if(startsHere) items.push({t, icon:'▶'});
+        if(endsHere) items.push({t, icon:'■'});
+      });
+      if(items.length===0) continue;
+      anyDay = true;
+      const dayLabel = offset===0 ? 'Aujourd\'hui' : offset===1 ? 'Demain' : d.toLocaleDateString('fr-FR',{weekday:'long', day:'2-digit', month:'long'});
+      html += '<div class="today-group">'+
+        '<div class="today-group-label">'+dayLabel+'</div>'+
+        items.map(({t,icon})=>'<div class="today-item" data-open="'+t.id+'"><span>'+icon+' <span class="nom">'+escapeHtml(t.nom)+'</span>'+
+          (taskZones(t).length?' <span class="zone">· '+escapeHtml(taskZones(t).join(' + '))+'</span>':'')+'</span></div>').join('')+
+      '</div>';
+    }
+    if(late.length===0 && !anyDay){
+      holder.innerHTML = '<div class="empty">Rien de prévu cette semaine — tout est à jour. 👍</div>';
+      return;
+    }
+  }
+
+  holder.innerHTML = html;
   holder.querySelectorAll('[data-open]').forEach(el=>el.addEventListener('click', ()=>openModal(el.dataset.open)));
 }
+document.querySelectorAll('[data-today-mode]').forEach(b=>b.addEventListener('click', ()=>{
+  todayMode = b.dataset.todayMode;
+  document.querySelectorAll('[data-today-mode]').forEach(x=>x.classList.toggle('on', x===b));
+  render();
+}));
 
 let pieceSortMode = 'avancement';
 
@@ -879,31 +930,31 @@ function renderTaskList(sched){
     return;
   }
 
-  // Tri
+  // Sépare tâches actives (à faire / en cours / bloquée) et terminées
+  let activeTasks = visibleTasks.filter(t=>t.statut!=='fait');
+  let doneTasks = visibleTasks.filter(t=>t.statut==='fait')
+    .sort((a,b)=> (b.dateFinReelle||'').localeCompare(a.dateFinReelle||''));
+
   if(sortMode==='manuel'){
-    visibleTasks = visibleTasks.slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
+    activeTasks = activeTasks.slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
   } else {
-    const done = visibleTasks.filter(t=>t.statut==='fait')
-      .sort((a,b)=> (b.dateFinReelle||'').localeCompare(a.dateFinReelle||''));
-    const rest = visibleTasks.filter(t=>t.statut!=='fait')
-      .sort((a,b)=>{
-        const ia = sched.byId && sched.byId[a.id] ? sched.byId[a.id].esIndex : 9999;
-        const ib = sched.byId && sched.byId[b.id] ? sched.byId[b.id].esIndex : 9999;
-        return ia - ib;
-      });
-    visibleTasks = [...done, ...rest];
+    activeTasks = activeTasks.slice().sort((a,b)=>{
+      const ia = sched.byId && sched.byId[a.id] ? sched.byId[a.id].esIndex : 9999;
+      const ib = sched.byId && sched.byId[b.id] ? sched.byId[b.id].esIndex : 9999;
+      return ia - ib;
+    });
   }
 
-  holder.innerHTML = filterHtml + visibleTasks.map((t,i)=>{
+  function cardHtmlFor(t, i, listForMove){
     const info = sched.byId ? sched.byId[t.id] : null;
     const depsNames = (t.dependances||[]).map(id=> byId[id]? byId[id].nom : '?').join(', ');
     const late = info && t.statut!=='fait' && info.endDate < today;
     const cat = catInfo(t.categorie);
-    const moveButtons = sortMode==='manuel' ? (
+    const moveButtons = (listForMove && sortMode==='manuel') ? (
       '<button data-move-up="'+t.id+'" '+(i===0?'disabled':'')+'>▲</button>'+
-      '<button data-move-down="'+t.id+'" '+(i===visibleTasks.length-1?'disabled':'')+'>▼</button>'
+      '<button data-move-down="'+t.id+'" '+(i===listForMove.length-1?'disabled':'')+'>▼</button>'
     ) : '';
-    const cardHtml = '<div class="task">'+
+    return '<div class="task">'+
       '<div class="task-top">'+
         '<div><div class="nom">'+escapeHtml(t.nom)+'</div>'+(taskZones(t).length?'<div class="zone">'+escapeHtml(taskZones(t).join(' + '))+'</div>':'')+'</div>'+
         '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">'+
@@ -925,14 +976,26 @@ function renderTaskList(sched){
         moveButtons+
       '</div>'+
     '</div>';
-    if(t.statut==='fait'){
-      return cardHtml; // pas de swipe sur une tâche déjà terminée
-    }
-    return '<div class="task-swipe" data-task-id="'+t.id+'"><div class="swipe-bg">✓ Terminée</div>'+cardHtml+'</div>';
-  }).join('');
+  }
 
-  wireTaskListControls(sched, byId, visibleTasks);
+  const activeHtml = activeTasks.length ? activeTasks.map((t,i)=>{
+    const cardHtml = cardHtmlFor(t, i, activeTasks);
+    return '<div class="task-swipe" data-task-id="'+t.id+'"><div class="swipe-bg">✓ Terminée</div>'+cardHtml+'</div>';
+  }).join('') : '<div class="empty">Aucune tâche active — tout est terminé ou rien n\'a encore été créé pour ce filtre.</div>';
+
+  const doneHtml = doneTasks.length ?
+    '<div class="done-toggle-wrap">'+
+      '<button id="btnToggleDone" class="done-toggle">'+(doneCollapsed?'▸':'▾')+' Terminées ('+doneTasks.length+')</button>'+
+      (doneCollapsed ? '' : '<div id="doneListHolder">'+doneTasks.map((t,i)=>cardHtmlFor(t,i,null)).join('')+'</div>')+
+    '</div>' : '';
+
+  holder.innerHTML = filterHtml + activeHtml + doneHtml;
+
+  wireTaskListControls(sched, byId, activeTasks);
   attachSwipeHandlers(sched, byId);
+
+  const toggleBtn = document.getElementById('btnToggleDone');
+  if(toggleBtn) toggleBtn.addEventListener('click', ()=>{ doneCollapsed = !doneCollapsed; renderTaskList(sched); });
 }
 
 function completeTask(id, sched, byId){
