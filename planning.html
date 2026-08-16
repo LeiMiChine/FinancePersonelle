@@ -671,16 +671,15 @@ function renderToday(sched){
   let html = group('⚠ En retard', late, true);
 
   if(todayMode==='jour'){
-    const starting=[], ending=[];
+    const starting = [];
     state.tasks.forEach(t=>{
       if(t.statut==='fait') return;
       const info = sched.byId ? sched.byId[t.id] : null;
       if(!info) return;
       if(isoOf(info.startDate)===todayStr) starting.push(t);
-      if(isoOf(info.endDate)===todayStr) ending.push(t);
     });
-    html += group('▶ Démarrent aujourd\'hui', starting) + group('■ Se terminent aujourd\'hui (prévu)', ending);
-    if(late.length===0 && starting.length===0 && ending.length===0){
+    html += group('Démarrent aujourd\'hui', starting);
+    if(late.length===0 && starting.length===0){
       holder.innerHTML = '<div class="empty">Rien de prévu aujourd\'hui — tout est à jour. 👍</div>';
       return;
     }
@@ -694,19 +693,12 @@ function renderToday(sched){
         if(t.statut==='fait') return;
         const info = sched.byId ? sched.byId[t.id] : null;
         if(!info) return;
-        const startsHere = isoOf(info.startDate)===dStr;
-        const endsHere = isoOf(info.endDate)===dStr;
-        if(startsHere) items.push({t, icon:'▶'});
-        if(endsHere) items.push({t, icon:'■'});
+        if(isoOf(info.startDate)===dStr) items.push(t);
       });
       if(items.length===0) continue;
       anyDay = true;
       const dayLabel = offset===0 ? 'Aujourd\'hui' : offset===1 ? 'Demain' : d.toLocaleDateString('fr-FR',{weekday:'long', day:'2-digit', month:'long'});
-      html += '<div class="today-group">'+
-        '<div class="today-group-label">'+dayLabel+'</div>'+
-        items.map(({t,icon})=>'<div class="today-item" data-open="'+t.id+'"><span>'+icon+' <span class="nom">'+escapeHtml(t.nom)+'</span>'+
-          (taskZones(t).length?' <span class="zone">· '+escapeHtml(taskZones(t).join(' + '))+'</span>':'')+'</span></div>').join('')+
-      '</div>';
+      html += group(dayLabel, items);
     }
     if(late.length===0 && !anyDay){
       holder.innerHTML = '<div class="empty">Rien de prévu cette semaine — tout est à jour. 👍</div>';
