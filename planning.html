@@ -99,6 +99,14 @@ main{padding:14px 12px;max-width:920px;margin:0 auto}
 .piece-badge.crit{background:#4a3319;color:var(--amber)}
 .piece-badge.late{background:#4a2323;color:var(--red)}
 .piece-badge.done{background:#1e3b2c;color:var(--green)}
+
+.today-group{margin-bottom:14px}
+.today-group:last-child{margin-bottom:0}
+.today-group-label{font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);margin-bottom:6px;font-weight:700}
+.today-group-label.warn{color:var(--red)}
+.today-item{display:flex;justify-content:space-between;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;cursor:pointer}
+.today-item .nom{font-size:13px;font-weight:600}
+.today-item .zone{font-size:11px;color:var(--muted)}
 .task-actions button[data-move-up],.task-actions button[data-move-down]{padding:5px 9px}
 .task-actions button:disabled{opacity:.3;cursor:default}
 .task-meta{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--muted);margin-top:6px}
@@ -156,6 +164,11 @@ textarea{min-height:60px;resize:vertical}
       <div class="kpi"><div class="v" id="kpiJours">—</div><div class="l">Jours ouvrés restants</div></div>
       <div class="kpi" id="kpiAvancementBox"><div class="v" id="kpiAvancement">—</div><div class="l">Tâches terminées</div></div>
       <div class="kpi" id="kpiRetardBox"><div class="v" id="kpiRetard">—</div><div class="l">Tâches en retard</div></div>
+    </div>
+
+    <div class="card" id="todayCard">
+      <h2>Aujourd'hui — <span id="todayDateLabel"></span></h2>
+      <div id="todayHolder"></div>
     </div>
 
     <div class="card">
@@ -558,11 +571,54 @@ function render(){
   const sched = computeSchedule();
   renderHeader(sched);
   renderKPIs(sched);
+  renderToday(sched);
   renderGantt(sched);
   renderCriticalPath(sched);
   renderTaskList(sched);
   renderZoneManager();
   renderPieces(sched);
+}
+
+function renderToday(sched){
+  const label = document.getElementById('todayDateLabel');
+  const today = new Date(); today.setHours(0,0,0,0);
+  label.textContent = today.toLocaleDateString('fr-FR',{weekday:'long', day:'2-digit', month:'long'});
+
+  const holder = document.getElementById('todayHolder');
+  if(state.tasks.length===0){ holder.innerHTML='<div class="empty">Aucune tâche pour l\'instant.</div>'; return; }
+  if(sched.error){ holder.innerHTML=''; return; }
+
+  const todayStr = todayISO();
+  const starting=[], ending=[], late=[];
+  state.tasks.forEach(t=>{
+    if(t.statut==='fait') return;
+    const info = sched.byId ? sched.byId[t.id] : null;
+    if(!info) return;
+    if(isoOf(info.startDate)===todayStr) starting.push(t);
+    if(isoOf(info.endDate)===todayStr) ending.push(t);
+    if(info.endDate < today) late.push(t);
+  });
+
+  if(starting.length===0 && ending.length===0 && late.length===0){
+    holder.innerHTML = '<div class="empty">Rien de prévu aujourd\'hui — tout est à jour. 👍</div>';
+    return;
+  }
+
+  function group(title, tasks, warn){
+    if(tasks.length===0) return '';
+    return '<div class="today-group">'+
+      '<div class="today-group-label'+(warn?' warn':'')+'">'+title+' ('+tasks.length+')</div>'+
+      tasks.map(t=>'<div class="today-item" data-open="'+t.id+'"><span><span class="nom">'+escapeHtml(t.nom)+'</span>'+
+        (t.zone?' <span class="zone">· '+escapeHtml(t.zone)+'</span>':'')+'</span></div>').join('')+
+    '</div>';
+  }
+
+  holder.innerHTML =
+    group('⚠ En retard', late, true) +
+    group('▶ Démarrent aujourd\'hui', starting) +
+    group('■ Se terminent aujourd\'hui (prévu)', ending);
+
+  holder.querySelectorAll('[data-open]').forEach(el=>el.addEventListener('click', ()=>openModal(el.dataset.open)));
 }
 
 let pieceSortMode = 'avancement';
@@ -777,7 +833,7 @@ function renderTaskList(sched){
       '<button data-move-up="'+t.id+'" '+(i===0?'disabled':'')+'>▲</button>'+
       '<button data-move-down="'+t.id+'" '+(i===visibleTasks.length-1?'disabled':'')+'>▼</button>'
     ) : '';
-    return '<div class="task">'+
+    const cardHtml = '<div class="task">'+
       '<div class="task-top">'+
         '<div><div class="nom">'+escapeHtml(t.nom)+'</div>'+(t.zone?'<div class="zone">'+escapeHtml(t.zone)+'</div>':'')+'</div>'+
         '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">'+
@@ -795,23 +851,79 @@ function renderTaskList(sched){
       '<div class="task-actions">'+
         '<button data-edit="'+t.id+'">Modifier</button>'+
         (t.statut!=='fait' ? '<button data-done="'+t.id+'">✓ Marquer terminée</button>' : '')+
+        '<button data-dup="'+t.id+'">Dupliquer</button>'+
         moveButtons+
       '</div>'+
     '</div>';
+    if(t.statut==='fait'){
+      return cardHtml; // pas de swipe sur une tâche déjà terminée
+    }
+    return '<div class="task-swipe" data-task-id="'+t.id+'"><div class="swipe-bg">✓ Terminée</div>'+cardHtml+'</div>';
   }).join('');
 
   wireTaskListControls(sched, byId, visibleTasks);
+  attachSwipeHandlers(sched, byId);
+}
+
+function completeTask(id, sched, byId){
+  const t = byId[id];
+  if(!t) return;
+  t.statut='fait';
+  if(!t.dateDebutReel){ const info=sched.byId[id]; t.dateDebutReel = info? isoOf(info.startDate): todayISO(); }
+  t.dateFinReelle = todayISO();
+  save(); render();
+}
+
+function attachSwipeHandlers(sched, byId){
+  document.querySelectorAll('.task-swipe').forEach(wrap=>{
+    const card = wrap.querySelector('.task');
+    const id = wrap.dataset.taskId;
+    let startX=0, startY=0, dx=0, dragging=false, decided=false, horizontal=false;
+
+    card.style.transition = 'transform .2s ease';
+    card.addEventListener('pointerdown', e=>{
+      startX=e.clientX; startY=e.clientY; dx=0; dragging=true; decided=false; horizontal=false;
+      card.style.transition='none';
+    });
+    card.addEventListener('pointermove', e=>{
+      if(!dragging) return;
+      const curDx = e.clientX-startX;
+      const curDy = e.clientY-startY;
+      if(!decided){
+        if(Math.abs(curDx) > 8 || Math.abs(curDy) > 8){
+          decided = true;
+          horizontal = Math.abs(curDx) > Math.abs(curDy);
+          if(!horizontal){ dragging=false; card.style.transition='transform .2s ease'; return; }
+        } else return;
+      }
+      dx = Math.min(0, curDx);
+      dx = Math.max(dx, -140);
+      card.style.transform = 'translateX('+dx+'px)';
+    });
+    function end(){
+      if(!dragging) return;
+      dragging=false;
+      card.style.transition='transform .2s ease';
+      if(dx < -90){
+        card.style.transform='translateX(-100%)';
+        setTimeout(()=>{ completeTask(id, sched, byId); }, 150);
+      } else {
+        card.style.transform='translateX(0)';
+      }
+    }
+    card.addEventListener('pointerup', end);
+    card.addEventListener('pointercancel', end);
+  });
 }
 
 function wireTaskListControls(sched, byId, visibleTasks){
   const holder = document.getElementById('taskListHolder');
   holder.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=>openModal(b.dataset.edit)));
   holder.querySelectorAll('[data-done]').forEach(b=>b.addEventListener('click', ()=>{
-    const t = byId[b.dataset.done];
-    t.statut='fait';
-    if(!t.dateDebutReel){ const info=sched.byId[t.id]; t.dateDebutReel = info? isoOf(info.startDate): todayISO(); }
-    t.dateFinReelle = todayISO();
-    save(); render();
+    completeTask(b.dataset.done, sched, byId);
+  }));
+  holder.querySelectorAll('[data-dup]').forEach(b=>b.addEventListener('click', ()=>{
+    duplicateTask(b.dataset.dup);
   }));
   holder.querySelectorAll('[data-move-up]').forEach(b=>b.addEventListener('click', ()=>{
     const idx = visibleTasks.findIndex(t=>t.id===b.dataset.moveUp);
@@ -875,6 +987,22 @@ function openModal(id){
   chipsHolder.querySelectorAll('.chip-dep').forEach(c=>c.addEventListener('click', ()=>c.classList.toggle('sel')));
 
   document.getElementById('modalOverlay').style.display='block';
+}
+
+function duplicateTask(id){
+  const orig = state.tasks.find(t=>t.id===id);
+  if(!orig) return;
+  openModal(null); // ouvre en mode "nouvelle tâche"
+  document.getElementById('fNom').value = orig.nom + ' (copie)';
+  document.getElementById('fZone').value = orig.zone || document.getElementById('fZone').options[0]?.value || '';
+  document.getElementById('fCategorie').value = orig.categorie || 'divers';
+  document.getElementById('fDuree').value = orig.duree || 1;
+  document.getElementById('fNotes').value = orig.notes || '';
+  // reprend les mêmes dépendances que la tâche source
+  const selectedDeps = new Set(orig.dependances||[]);
+  document.querySelectorAll('#depChips .chip-dep').forEach(c=>{
+    if(selectedDeps.has(c.dataset.id)) c.classList.add('sel');
+  });
 }
 function closeModal(){ document.getElementById('modalOverlay').style.display='none'; editingId=null; }
 function toggleRealDates(){
