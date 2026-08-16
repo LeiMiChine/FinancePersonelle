@@ -85,6 +85,20 @@ main{padding:14px 12px;max-width:920px;margin:0 auto}
 .sort-toggle{display:flex;gap:6px;margin-bottom:14px}
 .sort-toggle button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:7px 4px;font-size:12px;font-weight:600;cursor:pointer}
 .sort-toggle button.on{background:var(--amber-dim);border-color:var(--amber);color:var(--amber)}
+
+.piece-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+.piece-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.piece-top .nom{font-size:15px;font-weight:700}
+.piece-top .pct{font-size:18px;font-weight:800;color:var(--amber)}
+.piece-bar{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;margin-bottom:10px}
+.piece-bar>i{display:block;height:100%;border-radius:5px}
+.piece-stats{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--muted)}
+.piece-stats span b{color:var(--text)}
+.piece-badges{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.piece-badge{font-size:10px;padding:3px 8px;border-radius:20px;font-weight:700}
+.piece-badge.crit{background:#4a3319;color:var(--amber)}
+.piece-badge.late{background:#4a2323;color:var(--red)}
+.piece-badge.done{background:#1e3b2c;color:var(--green)}
 .task-actions button[data-move-up],.task-actions button[data-move-down]{padding:5px 9px}
 .task-actions button:disabled{opacity:.3;cursor:default}
 .task-meta{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--muted);margin-top:6px}
@@ -129,6 +143,7 @@ textarea{min-height:60px;resize:vertical}
 <nav class="tabs">
   <button data-view="planning" class="active">Planning</button>
   <button data-view="taches">Tâches</button>
+  <button data-view="pieces">Pièces</button>
   <button data-view="reglages">Réglages</button>
 </nav>
 
@@ -163,6 +178,15 @@ textarea{min-height:60px;resize:vertical}
   <!-- TACHES -->
   <section class="view" id="view-taches">
     <div id="taskListHolder"></div>
+  </section>
+
+  <!-- PIECES -->
+  <section class="view" id="view-pieces">
+    <div class="sort-toggle" style="margin-bottom:14px">
+      <button data-piece-sort="avancement" class="on">Priorité (moins avancées d'abord)</button>
+      <button data-piece-sort="alpha">Alphabétique</button>
+    </div>
+    <div id="piecesHolder"></div>
   </section>
 
   <!-- REGLAGES -->
@@ -538,7 +562,68 @@ function render(){
   renderCriticalPath(sched);
   renderTaskList(sched);
   renderZoneManager();
+  renderPieces(sched);
 }
+
+let pieceSortMode = 'avancement';
+
+function renderPieces(sched){
+  const holder = document.getElementById('piecesHolder');
+  if(state.tasks.length===0){ holder.innerHTML='<div class="empty">Aucune tâche. Ajoute des tâches avec une pièce assignée pour voir apparaître le suivi par pièce.</div>'; return; }
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const roomNames = Array.from(new Set(state.tasks.map(t=>t.zone && t.zone.trim() ? t.zone : 'Sans pièce')));
+
+  let rooms = roomNames.map(nom=>{
+    const roomTasks = state.tasks.filter(t=>(t.zone && t.zone.trim() ? t.zone : 'Sans pièce')===nom);
+    const totalDuree = roomTasks.reduce((s,t)=>s+(parseInt(t.duree)||1),0);
+    const doneDuree = roomTasks.reduce((s,t)=> s + (t.statut==='fait' ? (parseInt(t.duree)||1) : 0), 0);
+    const pct = totalDuree ? Math.round(doneDuree/totalDuree*100) : 0;
+    const counts = { a_faire:0, en_cours:0, fait:0, bloque:0 };
+    roomTasks.forEach(t=>counts[t.statut] = (counts[t.statut]||0)+1);
+    let minStart=null, maxEnd=null, hasCritical=false, lateCount=0;
+    roomTasks.forEach(t=>{
+      const info = sched.byId ? sched.byId[t.id] : null;
+      if(info){
+        if(!minStart || info.startDate<minStart) minStart = info.startDate;
+        if(!maxEnd || info.endDate>maxEnd) maxEnd = info.endDate;
+        if(info.critical && t.statut!=='fait') hasCritical = true;
+        if(t.statut!=='fait' && info.endDate<today) lateCount++;
+      }
+    });
+    return { nom, total: roomTasks.length, totalDuree, pct, counts, minStart, maxEnd, hasCritical, lateCount };
+  });
+
+  if(pieceSortMode==='alpha'){
+    rooms.sort((a,b)=>a.nom.localeCompare(b.nom));
+  } else {
+    rooms.sort((a,b)=> a.pct - b.pct || a.nom.localeCompare(b.nom));
+  }
+
+  holder.innerHTML = rooms.map(r=>{
+    const barColor = r.lateCount>0 ? 'var(--red)' : (r.pct===100 ? 'var(--green)' : (r.hasCritical ? 'var(--amber)' : 'var(--blue)'));
+    return '<div class="piece-card">'+
+      '<div class="piece-top"><span class="nom">'+escapeHtml(r.nom)+'</span><span class="pct">'+r.pct+'%</span></div>'+
+      '<div class="piece-bar"><i style="width:'+r.pct+'%;background:'+barColor+'"></i></div>'+
+      '<div class="piece-stats">'+
+        '<span><b>'+r.counts.fait+'</b>/'+r.total+' terminées</span>'+
+        (r.counts.en_cours ? '<span><b>'+r.counts.en_cours+'</b> en cours</span>' : '')+
+        (r.counts.bloque ? '<span style="color:var(--red)"><b>'+r.counts.bloque+'</b> bloquée(s)</span>' : '')+
+        (r.minStart && r.maxEnd ? '<span><b>'+fmtFR(r.minStart)+'</b> → <b>'+fmtFR(r.maxEnd)+'</b></span>' : '')+
+      '</div>'+
+      '<div class="piece-badges">'+
+        (r.pct===100 ? '<span class="piece-badge done">✓ Terminée</span>' : '')+
+        (r.hasCritical ? '<span class="piece-badge crit">Chemin critique</span>' : '')+
+        (r.lateCount>0 ? '<span class="piece-badge late">'+r.lateCount+' en retard</span>' : '')+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+document.querySelectorAll('[data-piece-sort]').forEach(b=>b.addEventListener('click', ()=>{
+  pieceSortMode = b.dataset.pieceSort;
+  document.querySelectorAll('[data-piece-sort]').forEach(x=>x.classList.toggle('on', x===b));
+  render();
+}));
 
 function renderHeader(sched){
   document.getElementById('hdrSub').textContent = state.tasks.length + ' tâche(s) · début ' + fmtFR(new Date(state.settings.startDate+'T00:00:00'));
