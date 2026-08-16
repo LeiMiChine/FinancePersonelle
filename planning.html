@@ -82,6 +82,11 @@ main{padding:14px 12px;max-width:920px;margin:0 auto}
 .cat-badge{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:700;flex:none;border:1px solid transparent}
 .filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
 .filters select{width:auto;flex:1;min-width:130px;font-size:12px;padding:7px 8px}
+.sort-toggle{display:flex;gap:6px;margin-bottom:14px}
+.sort-toggle button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:7px 4px;font-size:12px;font-weight:600;cursor:pointer}
+.sort-toggle button.on{background:var(--amber-dim);border-color:var(--amber);color:var(--amber)}
+.task-actions button[data-move-up],.task-actions button[data-move-down]{padding:5px 9px}
+.task-actions button:disabled{opacity:.3;cursor:default}
 .task-meta{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--muted);margin-top:6px}
 .task-meta b{color:var(--text)}
 .crit-tag{color:var(--amber);font-weight:700}
@@ -264,7 +269,8 @@ const DEFAULT_STATE = {
     zones: ["Cuisine","Salon / séjour","Chambre","Salle de bain","WC","Couloir / entrée","Extérieur","Général"] },
   tasks: [],
   sync: { apiKey: '', databaseURL: '', room: '' },
-  updatedAt: 0
+  updatedAt: 0,
+  nextOrdre: 1
 };
 
 let state = load();
@@ -325,6 +331,7 @@ function initFirebaseSync(){
         applyingRemote = true;
         state.tasks = remote.tasks || [];
         state.settings = Object.assign({}, state.settings, remote.settings || {});
+        state.nextOrdre = Math.max(state.nextOrdre||1, remote.nextOrdre||1);
         state.updatedAt = remote.updatedAt;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
         render(); loadSettingsForm();
@@ -341,7 +348,7 @@ function initFirebaseSync(){
 
 function pushToFirebase(){
   if(!fbRef || applyingRemote) return;
-  fbRef.set({ tasks: state.tasks, settings: state.settings, updatedAt: state.updatedAt })
+  fbRef.set({ tasks: state.tasks, settings: state.settings, updatedAt: state.updatedAt, nextOrdre: state.nextOrdre })
     .catch(e=>updateSyncStatus('Erreur d\'envoi : ' + e.message, true));
 }
 function schedulePush(){
@@ -521,6 +528,7 @@ function escapeHtmlAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
 
 let filterZone = '';
 let filterCat = '';
+let sortMode = 'date'; // 'date' = trié automatiquement, 'manuel' = ordre libre par flèches
 
 function render(){
   const sched = computeSchedule();
@@ -644,6 +652,10 @@ function renderTaskList(sched){
       '<select id="filterCatSel"><option value="">Toutes les catégories</option>'+
         CATEGORIES.filter(c=>usedCats.includes(c.id)).map(c=>'<option value="'+c.id+'"'+(c.id===filterCat?' selected':'')+'>'+c.label+'</option>').join('')+
       '</select>'+
+    '</div>'+
+    '<div class="sort-toggle">'+
+      '<button data-sort="date" class="'+(sortMode==='date'?'on':'')+'">Trier par date</button>'+
+      '<button data-sort="manuel" class="'+(sortMode==='manuel'?'on':'')+'">Ordre manuel</button>'+
     '</div>';
 
   let visibleTasks = state.tasks;
@@ -652,16 +664,34 @@ function renderTaskList(sched){
 
   if(visibleTasks.length===0){
     holder.innerHTML = filterHtml + '<div class="empty">Aucune tâche ne correspond à ce filtre.</div>';
-    document.getElementById('filterZoneSel').addEventListener('change', e=>{ filterZone=e.target.value; renderTaskList(sched); });
-    document.getElementById('filterCatSel').addEventListener('change', e=>{ filterCat=e.target.value; renderTaskList(sched); });
+    wireTaskListControls(sched, byId, []);
     return;
   }
 
-  holder.innerHTML = filterHtml + visibleTasks.map(t=>{
+  // Tri
+  if(sortMode==='manuel'){
+    visibleTasks = visibleTasks.slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
+  } else {
+    const done = visibleTasks.filter(t=>t.statut==='fait')
+      .sort((a,b)=> (b.dateFinReelle||'').localeCompare(a.dateFinReelle||''));
+    const rest = visibleTasks.filter(t=>t.statut!=='fait')
+      .sort((a,b)=>{
+        const ia = sched.byId && sched.byId[a.id] ? sched.byId[a.id].esIndex : 9999;
+        const ib = sched.byId && sched.byId[b.id] ? sched.byId[b.id].esIndex : 9999;
+        return ia - ib;
+      });
+    visibleTasks = [...done, ...rest];
+  }
+
+  holder.innerHTML = filterHtml + visibleTasks.map((t,i)=>{
     const info = sched.byId ? sched.byId[t.id] : null;
     const depsNames = (t.dependances||[]).map(id=> byId[id]? byId[id].nom : '?').join(', ');
     const late = info && t.statut!=='fait' && info.endDate < today;
     const cat = catInfo(t.categorie);
+    const moveButtons = sortMode==='manuel' ? (
+      '<button data-move-up="'+t.id+'" '+(i===0?'disabled':'')+'>▲</button>'+
+      '<button data-move-down="'+t.id+'" '+(i===visibleTasks.length-1?'disabled':'')+'>▼</button>'
+    ) : '';
     return '<div class="task">'+
       '<div class="task-top">'+
         '<div><div class="nom">'+escapeHtml(t.nom)+'</div>'+(t.zone?'<div class="zone">'+escapeHtml(t.zone)+'</div>':'')+'</div>'+
@@ -680,10 +710,16 @@ function renderTaskList(sched){
       '<div class="task-actions">'+
         '<button data-edit="'+t.id+'">Modifier</button>'+
         (t.statut!=='fait' ? '<button data-done="'+t.id+'">✓ Marquer terminée</button>' : '')+
+        moveButtons+
       '</div>'+
     '</div>';
   }).join('');
 
+  wireTaskListControls(sched, byId, visibleTasks);
+}
+
+function wireTaskListControls(sched, byId, visibleTasks){
+  const holder = document.getElementById('taskListHolder');
   holder.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click', ()=>openModal(b.dataset.edit)));
   holder.querySelectorAll('[data-done]').forEach(b=>b.addEventListener('click', ()=>{
     const t = byId[b.dataset.done];
@@ -692,8 +728,28 @@ function renderTaskList(sched){
     t.dateFinReelle = todayISO();
     save(); render();
   }));
-  document.getElementById('filterZoneSel').addEventListener('change', e=>{ filterZone=e.target.value; renderTaskList(sched); });
-  document.getElementById('filterCatSel').addEventListener('change', e=>{ filterCat=e.target.value; renderTaskList(sched); });
+  holder.querySelectorAll('[data-move-up]').forEach(b=>b.addEventListener('click', ()=>{
+    const idx = visibleTasks.findIndex(t=>t.id===b.dataset.moveUp);
+    if(idx<=0) return;
+    const a = visibleTasks[idx], c = visibleTasks[idx-1];
+    const tmp = a.ordre; a.ordre = c.ordre; c.ordre = tmp;
+    save(); render();
+  }));
+  holder.querySelectorAll('[data-move-down]').forEach(b=>b.addEventListener('click', ()=>{
+    const idx = visibleTasks.findIndex(t=>t.id===b.dataset.moveDown);
+    if(idx<0 || idx>=visibleTasks.length-1) return;
+    const a = visibleTasks[idx], c = visibleTasks[idx+1];
+    const tmp = a.ordre; a.ordre = c.ordre; c.ordre = tmp;
+    save(); render();
+  }));
+  const zoneSel = document.getElementById('filterZoneSel');
+  const catSel = document.getElementById('filterCatSel');
+  if(zoneSel) zoneSel.addEventListener('change', e=>{ filterZone=e.target.value; renderTaskList(sched); });
+  if(catSel) catSel.addEventListener('change', e=>{ filterCat=e.target.value; renderTaskList(sched); });
+  holder.querySelectorAll('[data-sort]').forEach(b=>b.addEventListener('click', ()=>{
+    sortMode = b.dataset.sort;
+    renderTaskList(sched);
+  }));
 }
 
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -750,8 +806,13 @@ document.getElementById('btnSaveTask').addEventListener('click', ()=>{
     errEl.innerHTML='<div class="err">Indique le nom de la nouvelle pièce.</div>'; return;
   }
   const deps = Array.from(document.querySelectorAll('#depChips .chip-dep.sel')).map(c=>c.dataset.id);
+  const orig = editingId ? state.tasks.find(t=>t.id===editingId) : null;
+  let ordreValue;
+  if(orig){ ordreValue = orig.ordre; }
+  else { state.nextOrdre = (state.nextOrdre||1) + 1; ordreValue = state.nextOrdre - 1; }
   const data = {
     id: editingId || uid(),
+    ordre: ordreValue,
     nom,
     zone: (document.getElementById('fZone').value === '__new__'
              ? document.getElementById('fZoneCustom').value.trim()
