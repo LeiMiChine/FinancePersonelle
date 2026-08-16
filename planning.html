@@ -262,16 +262,13 @@ textarea{min-height:60px;resize:vertical}
     <div id="modalErr"></div>
     <label>Nom de la tâche</label>
     <input type="text" id="fNom" placeholder="Ex: Pose du carrelage salle de bain">
-    <div class="row2">
-      <div>
-        <label>Pièce / zone</label>
-        <select id="fZone"></select>
-        <input type="text" id="fZoneCustom" placeholder="Nom de la nouvelle pièce" style="display:none;margin-top:6px">
-      </div>
-      <div>
-        <label>Catégorie</label>
-        <select id="fCategorie"></select>
-      </div>
+    <label>Catégorie</label>
+    <select id="fCategorie"></select>
+    <label>Pièces / zones (une ou plusieurs)</label>
+    <div class="chips" id="fZoneChips"></div>
+    <div class="row2" style="margin-top:8px">
+      <input type="text" id="fZoneNewInput" placeholder="Ajouter une nouvelle pièce">
+      <button class="btn small secondary" id="btnAddZoneInModal" type="button" style="width:auto">Ajouter</button>
     </div>
     <label>Durée (jours ouvrés)</label>
     <input type="number" id="fDuree" min="1" value="1">
@@ -549,19 +546,41 @@ function populateCategorySelect(){
   sel.innerHTML = CATEGORIES.map(c=>'<option value="'+c.id+'">'+c.label+'</option>').join('');
 }
 /* ---------------- Pièces (propres au Planning, indépendantes de Chantier Nazareth Express) ---------------- */
-function populateZoneSelect(){
-  const sel = document.getElementById('fZone');
-  const usedZones = Array.from(new Set(state.tasks.map(t=>t.zone).filter(Boolean)));
+function populateZoneChips(selectedZones){
+  const holder = document.getElementById('fZoneChips');
+  const usedZones = Array.from(new Set(state.tasks.flatMap(t=>taskZones(t))));
   const pieces = Array.from(new Set([...(state.settings.zones||[]), ...usedZones]));
-  sel.innerHTML = pieces.map(z=>'<option value="'+escapeHtmlAttr(z)+'">'+escapeHtml(z)+'</option>').join('')
-    + '<option value="__new__">+ Nouvelle pièce…</option>';
+  const selected = new Set(selectedZones||[]);
+  holder.innerHTML = pieces.length ? pieces.map(z=>
+    '<span class="chip-dep'+(selected.has(z)?' sel':'')+'" data-zone="'+escapeHtmlAttr(z)+'">'+escapeHtml(z)+'</span>'
+  ).join('') : '<span style="font-size:12px;color:var(--muted)">Aucune pièce encore créée — ajoutes-en une ci-dessous.</span>';
+  holder.querySelectorAll('.chip-dep').forEach(c=>c.addEventListener('click', ()=>c.classList.toggle('sel')));
 }
-document.getElementById('fZone').addEventListener('change', ()=>{
-  const isNew = document.getElementById('fZone').value === '__new__';
-  document.getElementById('fZoneCustom').style.display = isNew ? 'block':'none';
-  if(isNew) document.getElementById('fZoneCustom').focus();
+function getSelectedZones(){
+  return Array.from(document.querySelectorAll('#fZoneChips .chip-dep.sel')).map(c=>c.dataset.zone);
+}
+document.getElementById('btnAddZoneInModal').addEventListener('click', ()=>{
+  const input = document.getElementById('fZoneNewInput');
+  const val = input.value.trim();
+  if(!val) return;
+  if(!state.settings.zones.includes(val)) state.settings.zones.push(val);
+  const current = getSelectedZones();
+  current.push(val);
+  input.value='';
+  populateZoneChips(current);
+  save(); renderZoneManager();
+});
+document.getElementById('fZoneNewInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); document.getElementById('btnAddZoneInModal').click(); }
 });
 function escapeHtmlAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
+/* Une tâche peut appartenir à plusieurs pièces (t.zones). Compatible avec les anciennes
+   tâches créées avant ce changement, qui n'avaient qu'une seule pièce (t.zone). */
+function taskZones(t){
+  if(t.zones && t.zones.length) return t.zones;
+  if(t.zone) return [t.zone];
+  return [];
+}
 
 let filterZone = '';
 let filterCat = '';
@@ -609,7 +628,7 @@ function renderToday(sched){
     return '<div class="today-group">'+
       '<div class="today-group-label'+(warn?' warn':'')+'">'+title+' ('+tasks.length+')</div>'+
       tasks.map(t=>'<div class="today-item" data-open="'+t.id+'"><span><span class="nom">'+escapeHtml(t.nom)+'</span>'+
-        (t.zone?' <span class="zone">· '+escapeHtml(t.zone)+'</span>':'')+'</span></div>').join('')+
+        (taskZones(t).length?' <span class="zone">· '+escapeHtml(taskZones(t).join(' + '))+'</span>':'')+'</span></div>').join('')+
     '</div>';
   }
 
@@ -628,10 +647,10 @@ function renderPieces(sched){
   if(state.tasks.length===0){ holder.innerHTML='<div class="empty">Aucune tâche. Ajoute des tâches avec une pièce assignée pour voir apparaître le suivi par pièce.</div>'; return; }
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const roomNames = Array.from(new Set(state.tasks.map(t=>t.zone && t.zone.trim() ? t.zone : 'Sans pièce')));
+  const roomNames = Array.from(new Set(state.tasks.flatMap(t=> taskZones(t).length ? taskZones(t) : ['Sans pièce'])));
 
   let rooms = roomNames.map(nom=>{
-    const roomTasks = state.tasks.filter(t=>(t.zone && t.zone.trim() ? t.zone : 'Sans pièce')===nom);
+    const roomTasks = state.tasks.filter(t=> (taskZones(t).length ? taskZones(t) : ['Sans pièce']).includes(nom));
     const totalDuree = roomTasks.reduce((s,t)=>s+(parseInt(t.duree)||1),0);
     const doneDuree = roomTasks.reduce((s,t)=> s + (t.statut==='fait' ? (parseInt(t.duree)||1) : 0), 0);
     const pct = totalDuree ? Math.round(doneDuree/totalDuree*100) : 0;
@@ -783,7 +802,7 @@ function renderTaskList(sched){
   const byId={}; state.tasks.forEach(t=>byId[t.id]=t);
   const today = new Date(); today.setHours(0,0,0,0);
 
-  const zones = Array.from(new Set(state.tasks.map(t=>t.zone).filter(Boolean))).sort();
+  const zones = Array.from(new Set(state.tasks.flatMap(t=>taskZones(t)))).sort();
   const usedCats = Array.from(new Set(state.tasks.map(t=>t.categorie).filter(Boolean)));
   const filterHtml =
     '<div class="filters">'+
@@ -800,7 +819,7 @@ function renderTaskList(sched){
     '</div>';
 
   let visibleTasks = state.tasks;
-  if(filterZone) visibleTasks = visibleTasks.filter(t=>t.zone===filterZone);
+  if(filterZone) visibleTasks = visibleTasks.filter(t=>taskZones(t).includes(filterZone));
   if(filterCat) visibleTasks = visibleTasks.filter(t=>t.categorie===filterCat);
 
   if(visibleTasks.length===0){
@@ -835,7 +854,7 @@ function renderTaskList(sched){
     ) : '';
     const cardHtml = '<div class="task">'+
       '<div class="task-top">'+
-        '<div><div class="nom">'+escapeHtml(t.nom)+'</div>'+(t.zone?'<div class="zone">'+escapeHtml(t.zone)+'</div>':'')+'</div>'+
+        '<div><div class="nom">'+escapeHtml(t.nom)+'</div>'+(taskZones(t).length?'<div class="zone">'+escapeHtml(taskZones(t).join(' + '))+'</div>':'')+'</div>'+
         '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">'+
           '<span class="badge '+t.statut+'">'+STATUT_LABEL[t.statut]+'</span>'+
           '<span class="cat-badge" style="background:'+cat.color+'22;color:'+cat.color+';border-color:'+cat.color+'55">'+cat.label+'</span>'+
@@ -958,16 +977,9 @@ function openModal(id){
   document.getElementById('modalErr').innerHTML='';
   document.getElementById('modalTitle').textContent = t ? 'Modifier la tâche' : 'Nouvelle tâche';
   document.getElementById('fNom').value = t? t.nom : '';
-  document.getElementById('fZoneCustom').style.display = 'none';
-  document.getElementById('fZoneCustom').value = '';
-  populateZoneSelect();
+  document.getElementById('fZoneNewInput').value = '';
+  populateZoneChips(t ? taskZones(t) : []);
   populateCategorySelect();
-  // si la pièce de la tâche n'est dans aucune liste (renommée/supprimée côté Chantier), on l'ajoute pour ne pas perdre la donnée
-  if(t && t.zone && !Array.from(document.getElementById('fZone').options).some(o=>o.value===t.zone)){
-    const opt = document.createElement('option'); opt.value=t.zone; opt.textContent=t.zone+' (introuvable dans la liste)';
-    document.getElementById('fZone').insertBefore(opt, document.getElementById('fZone').lastElementChild);
-  }
-  document.getElementById('fZone').value = t? (t.zone||document.getElementById('fZone').options[0]?.value||'') : (document.getElementById('fZone').options[0]?.value||'');
   document.getElementById('fCategorie').value = t? (t.categorie||'divers') : 'divers';
   document.getElementById('fDuree').value = t? t.duree : 1;
   document.getElementById('fStatut').value = t? t.statut : 'a_faire';
@@ -994,7 +1006,7 @@ function duplicateTask(id){
   if(!orig) return;
   openModal(null); // ouvre en mode "nouvelle tâche"
   document.getElementById('fNom').value = orig.nom + ' (copie)';
-  document.getElementById('fZone').value = orig.zone || document.getElementById('fZone').options[0]?.value || '';
+  populateZoneChips(taskZones(orig));
   document.getElementById('fCategorie').value = orig.categorie || 'divers';
   document.getElementById('fDuree').value = orig.duree || 1;
   document.getElementById('fNotes').value = orig.notes || '';
@@ -1015,10 +1027,8 @@ document.getElementById('btnSaveTask').addEventListener('click', ()=>{
   const nom = document.getElementById('fNom').value.trim();
   const errEl = document.getElementById('modalErr');
   if(!nom){ errEl.innerHTML='<div class="err">Le nom de la tâche est obligatoire.</div>'; return; }
-  if(document.getElementById('fZone').value === '__new__' && !document.getElementById('fZoneCustom').value.trim()){
-    errEl.innerHTML='<div class="err">Indique le nom de la nouvelle pièce.</div>'; return;
-  }
   const deps = Array.from(document.querySelectorAll('#depChips .chip-dep.sel')).map(c=>c.dataset.id);
+  const zonesSelected = getSelectedZones();
   const orig = editingId ? state.tasks.find(t=>t.id===editingId) : null;
   let ordreValue;
   if(orig){ ordreValue = orig.ordre; }
@@ -1027,9 +1037,7 @@ document.getElementById('btnSaveTask').addEventListener('click', ()=>{
     id: editingId || uid(),
     ordre: ordreValue,
     nom,
-    zone: (document.getElementById('fZone').value === '__new__'
-             ? document.getElementById('fZoneCustom').value.trim()
-             : document.getElementById('fZone').value.trim()),
+    zones: zonesSelected,
     categorie: document.getElementById('fCategorie').value || 'divers',
     duree: Math.max(1, parseInt(document.getElementById('fDuree').value)||1),
     statut: document.getElementById('fStatut').value,
@@ -1045,9 +1053,9 @@ document.getElementById('btnSaveTask').addEventListener('click', ()=>{
   } else {
     state.tasks.push(data);
   }
-  if(data.zone && !(state.settings.zones||[]).includes(data.zone)){
-    state.settings.zones = [...(state.settings.zones||[]), data.zone];
-  }
+  zonesSelected.forEach(z=>{
+    if(!(state.settings.zones||[]).includes(z)) state.settings.zones.push(z);
+  });
   save(); closeModal(); render();
 });
 document.getElementById('btnDeleteTask').addEventListener('click', ()=>{
@@ -1089,7 +1097,7 @@ function renderZoneManager(){
   ).join('');
   holder.querySelectorAll('[data-del-zone]').forEach(b=>b.addEventListener('click', ()=>{
     const z = b.dataset.delZone;
-    const enUsage = state.tasks.some(t=>t.zone===z);
+    const enUsage = state.tasks.some(t=>taskZones(t).includes(z));
     if(enUsage && !confirm('« '+z+' » est utilisée par au moins une tâche. La supprimer de la liste quand même ? Les tâches concernées garderont cette pièce.')) return;
     state.settings.zones = state.settings.zones.filter(x=>x!==z);
     save(); renderZoneManager();
@@ -1156,3 +1164,4 @@ document.addEventListener('click', (e)=>{
 </script>
 </body>
 </html>
+
