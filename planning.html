@@ -56,6 +56,7 @@ main{padding:14px 12px;max-width:920px;margin:0 auto}
 .g-dot{width:7px;height:7px;border-radius:50%;flex:none}
 .g-track{position:relative;border-bottom:1px solid var(--line);height:32px}
 .g-header .g-rowlabel{font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase}
+.g-group-label{background:var(--panel2)!important;color:var(--amber);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.3px;position:sticky;left:0;z-index:2;border-bottom:1px solid var(--line)}
 .g-header .g-track{height:22px}
 .g-bar{position:absolute;top:5px;height:22px;border-radius:6px;font-size:10px;color:#0f1115;display:flex;align-items:center;padding:0 6px;white-space:nowrap;overflow:hidden;font-weight:700}
 .g-bar.critical{background:var(--amber)}
@@ -787,18 +788,37 @@ function renderGantt(sched){
   }
 
   let rows = '';
+  const groups = new Map(); // nom de pièce -> tâches
   state.tasks.forEach(t=>{
-    const info = sched.byId[t.id];
-    if(!info) return;
-    const left = info.esIndex*dayW;
-    const width = Math.max(dayW-3, (info.efIndex-info.esIndex+1)*dayW - 3);
-    let cls = 'normal';
-    if(t.statut==='fait') cls='done';
-    else if(info.endDate < today) cls='late';
-    else if(info.critical) cls='critical';
-    const dotColor = t.statut==='fait'?'var(--green)': (info.critical?'var(--amber)':'var(--blue)');
-    rows += '<div class="g-rowlabel"><span class="g-dot" style="background:'+dotColor+'"></span>'+escapeHtml(t.nom)+'</div>'+
-      '<div class="g-track">'+ weekLines + '<div class="g-bar '+cls+'" title="'+escapeHtml(t.nom)+'" style="left:'+left+'px;width:'+width+'px">'+ (parseInt(t.duree)||1) +'j</div></div>';
+    if(!sched.byId[t.id]) return;
+    const zs = taskZones(t);
+    const key = zs.length ? zs[0] : 'Sans pièce';
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+  // ordonne les pièces par date de démarrage la plus précoce parmi leurs tâches
+  const groupOrder = Array.from(groups.entries()).map(([nom, tasks])=>{
+    const minEs = Math.min(...tasks.map(t=>sched.byId[t.id].esIndex));
+    return {nom, tasks, minEs};
+  }).sort((a,b)=>a.minEs-b.minEs);
+
+  groupOrder.forEach(g=>{
+    const tasksSorted = g.tasks.slice().sort((a,b)=>sched.byId[a.id].esIndex - sched.byId[b.id].esIndex);
+    if(groupOrder.length>1){
+      rows += '<div class="g-rowlabel g-group-label" style="grid-column:1 / -1">'+escapeHtml(g.nom)+'</div>';
+    }
+    tasksSorted.forEach(t=>{
+      const info = sched.byId[t.id];
+      const left = info.esIndex*dayW;
+      const width = Math.max(dayW-3, (info.efIndex-info.esIndex+1)*dayW - 3);
+      let cls = 'normal';
+      if(t.statut==='fait') cls='done';
+      else if(info.endDate < today) cls='late';
+      else if(info.critical) cls='critical';
+      const dotColor = t.statut==='fait'?'var(--green)': (info.critical?'var(--amber)':'var(--blue)');
+      rows += '<div class="g-rowlabel"><span class="g-dot" style="background:'+dotColor+'"></span>'+escapeHtml(t.nom)+'</div>'+
+        '<div class="g-track">'+ weekLines + '<div class="g-bar '+cls+'" title="'+escapeHtml(t.nom)+'" style="left:'+left+'px;width:'+width+'px">'+ (parseInt(t.duree)||1) +'j</div></div>';
+    });
   });
 
   const todayIdx = cal.findIndex(d=> d.getTime()===today.getTime());
