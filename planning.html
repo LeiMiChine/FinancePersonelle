@@ -182,6 +182,9 @@ textarea{min-height:60px;resize:vertical}
 
     <div class="card">
       <h2>Diagramme de Gantt</h2>
+      <label style="display:flex;align-items:center;gap:8px;flex-direction:row;text-transform:none;font-size:12px;color:var(--muted);margin-bottom:10px">
+        <input type="checkbox" id="ganttShowDone" style="width:auto"> Afficher les tâches terminées
+      </label>
       <div id="ganttHolder"></div>
       <div class="legend">
         <span><i style="background:var(--amber)"></i>Chemin critique</span>
@@ -624,6 +627,7 @@ let filterZone = '';
 let filterCat = '';
 let sortMode = 'date'; // 'date' = trié automatiquement, 'manuel' = ordre libre par flèches
 let doneCollapsed = true;
+let ganttShowDone = false;
 
 function render(){
   const sched = computeSchedule();
@@ -774,6 +778,10 @@ document.querySelectorAll('[data-piece-sort]').forEach(b=>b.addEventListener('cl
   document.querySelectorAll('[data-piece-sort]').forEach(x=>x.classList.toggle('on', x===b));
   render();
 }));
+document.getElementById('ganttShowDone').addEventListener('change', e=>{
+  ganttShowDone = e.target.checked;
+  render();
+});
 
 function renderHeader(sched){
   document.getElementById('hdrSub').textContent = state.tasks.length + ' tâche(s) · début ' + fmtFR(new Date(state.settings.startDate+'T00:00:00'));
@@ -816,6 +824,13 @@ function renderGantt(sched){
   if(sched.error){ holder.innerHTML = '<div class="err">'+sched.error+'</div>'; return; }
   if(state.tasks.length===0){ holder.innerHTML='<div class="empty">Ajoute une tâche pour voir le planning.</div>'; return; }
 
+  const tasksForGantt = ganttShowDone ? state.tasks : state.tasks.filter(t=>t.statut!=='fait');
+  const nbHidden = state.tasks.length - tasksForGantt.length;
+  if(tasksForGantt.length===0){
+    holder.innerHTML = '<div class="empty">'+(nbHidden>0 ? 'Toutes les tâches sont terminées — coche la case ci-dessus pour les revoir.' : 'Ajoute une tâche pour voir le planning.')+'</div>';
+    return;
+  }
+
   const dayW = 26;
   const span = sched.projectEndIndex+1;
   const cal = sched.cal;
@@ -832,7 +847,7 @@ function renderGantt(sched){
 
   let rows = '';
   const groups = new Map(); // nom de pièce -> tâches
-  state.tasks.forEach(t=>{
+  tasksForGantt.forEach(t=>{
     if(!sched.byId[t.id]) return;
     const zs = taskZones(t);
     const key = zs.length ? zs[0] : 'Sans pièce';
@@ -872,7 +887,8 @@ function renderGantt(sched){
       '<div class="g-rowlabel g-header" style="position:sticky;left:0">Tâche</div>'+
       '<div class="g-track g-header" style="position:relative">'+ headerCells + weekLines + todayLine + '</div>'+
       rows +
-    '</div></div>';
+    '</div></div>' +
+    (nbHidden>0 ? '<div style="font-size:11px;color:var(--muted);margin-top:8px">'+nbHidden+' tâche(s) terminée(s) masquée(s)</div>' : '');
 }
 
 function renderCriticalPath(sched){
