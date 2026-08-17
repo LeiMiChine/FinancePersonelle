@@ -54,11 +54,11 @@ main{padding:14px 12px;max-width:920px;margin:0 auto}
 .gantt{display:grid;grid-template-columns:150px 1fr;min-width:640px}
 .g-rowlabel{padding:6px 8px;font-size:12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;background:var(--panel);position:sticky;left:0;z-index:2}
 .g-dot{width:7px;height:7px;border-radius:50%;flex:none}
-.g-track{position:relative;border-bottom:1px solid var(--line);height:32px}
+.g-track{position:relative;border-bottom:1px solid var(--line);min-height:32px}
 .g-header .g-rowlabel{font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase}
 .g-group-label{background:var(--panel2)!important;color:var(--amber);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.3px;position:sticky;left:0;z-index:2;border-bottom:1px solid var(--line)}
-.g-header .g-track{height:22px}
-.g-bar{position:absolute;top:5px;height:22px;border-radius:6px;font-size:10px;color:#0f1115;display:flex;align-items:center;padding:0 6px;white-space:nowrap;overflow:hidden;font-weight:700}
+.g-header .g-track{min-height:22px}
+.g-bar{position:absolute;top:50%;transform:translateY(-50%);height:22px;border-radius:6px;font-size:10px;color:#0f1115;display:flex;align-items:center;padding:0 6px;white-space:nowrap;overflow:hidden;font-weight:700}
 .g-bar.critical{background:var(--amber)}
 .g-bar.normal{background:var(--blue)}
 .g-bar.done{background:var(--green)}
